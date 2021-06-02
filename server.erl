@@ -51,7 +51,6 @@ loop(Pids,Map,N)->
                         Move = string:split(L," ",all),
                         %update
                         NewValues = accel(Values,Move),
-                        
                         NewMap =maps:update(From,NewValues,Map),
                         loop(Pids,NewMap,N);
             {leave, Pid} ->
@@ -74,10 +73,18 @@ initial(N)->
 % Charge 1,2
 
 simulate(Map,Delta)->
+    %colide jogadores/jogadores
     Fun2 = fun(Key1,_,AccIn2) -> lists:merge(AccIn2,maps:fold(fun(Key2,_,AccIn1) -> check_collisionAux(Key1,Key2,Map,AccIn1) end,[],Map)) end,
     Collided = maps:fold(Fun2,[],Map), %devolve todos os pares de colisoes
-    lists:foreach(fun(Elem) -> collide(Elem,Map) end,Collided),
-    maps:fold(fun(Key,Value,AccIn) -> maps:update(Key,evolve(Value,Delta),AccIn) end,Map,Map).
+    lists:foreach(fun({Key1,Key2}) -> collide(Key1,Key2,Map) end,Collided),
+    %colide jogadores/paredes
+    MapWalls = maps:fold(fun(Key,_,AccIn3) -> maps:update(Key,collisionWalls(Key,Map),AccIn3) end,Map,Map),
+    %colide jogadores/criaturas
+
+    %colide jogadores/obstaculos
+
+    %evolui jogo
+    maps:fold(fun(Key,Value,AccIn) -> maps:update(Key,evolve(Value,Delta),AccIn) end,MapWalls,MapWalls).
 
 check_collisionAux(Key1,Key2,Map,AccIn1)->
     case Key1==Key2 of 
@@ -107,7 +114,17 @@ check_collision(X1,Y1,R1,X2,Y2,R2)->
     end,
 R.
 
-collide([Key1,Key2],Map)->
+collisionWalls(Key,Map)->
+    [X,Y,VX,VY,AX,AY,A,W,Alpha,R,I] = maps:get(Key,Map),
+    if
+        X-R =< 0 -> [X+0.5,Y,-VX,VY,AX,AY,A,W,Alpha,R,I];
+        Y-R =< 0 ->  [X,Y+0.5,VX,-VY,AX,AY,A,W,Alpha,R,I];
+        Y+R >= 720 ->  [X,Y-0.5,VX,-VY,AX,AY,A,W,Alpha,R,I];
+        X+R >= 1280 ->  [X-0.5,Y,-VX,VY,AX,AY,A,W,Alpha,R,I];
+        true -> [X,Y,VX,VY,AX,AY,A,W,Alpha,R,I]
+    end.
+
+collide(Key1,Key2,Map)->
     [_,_,_,_,_,_,_,_,_,R1,_] = maps:get(Key1,Map),
     [_,_,_,_,_,_,_,_,_,R2,_] = maps:get(Key2,Map),
     if
@@ -126,15 +143,15 @@ evolve(Data,Delta)->
     Dt = Delta*(1/1000),
     NewX = X+Vx*Dt,
     NewY = Y+Vy*Dt,
-    NewVx = (Vx*0.95)+Ax*Dt,
-    NewVy = (Vy*0.95)+Ay*Dt,
+    NewVx = (Vx*0.9)+Ax*Dt,
+    NewVy = (Vy*0.9)+Ay*Dt,
     NewA = A+W*Dt,
-    NewW = (W*0.95)+Alpha*Dt,
+    NewW = (W*0.85)+Alpha*Dt,
     [NewX,NewY,NewVx,NewVy,Ax,Ay,NewA,NewW,Alpha,R,I].
 
 accel([X,Y,VX,VY,AX,AY,A,W,Alpha,R,I],Move)->
-    Q = 1000,
-    J = 10,
+    Q = 3000,
+    J = 100,
     case lists:member(<<"u">>, Move) of
         true ->
             NewAX = Q*math:cos(A),
