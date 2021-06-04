@@ -5,7 +5,7 @@
 start()->
     Port = 5026,
     {ok, LSock} = gen_tcp:listen(Port, [binary, {packet, line}, {reuseaddr, true}]),
-    Pid = spawn(fun()-> loop(maps:new(),maps:new(),createObsList(4),0) end),
+    Pid = spawn(fun()-> loop(maps:new(),maps:new(),createObsList(4),maps:new(),0) end),
     spawn(fun()-> delta(16) end),
     register(?MODULE,Pid),
     spawn(fun() -> acceptor(LSock) end).
@@ -19,23 +19,26 @@ acceptor(LSock) ->
 %Pids Map Pid -> {Password,isOnline}
 %Positions Map Pid -> Position
 %Criaturas Map 
-loop(Pids,Map,ObsList,N)-> 
+loop(Pids,Map,ObsList,MapCreatures,N)-> 
     receive %high priority
         {run,Delta}->
-            NewMap = simulate(Map,ObsList,Delta),
-            sendState(Map),
-            loop(Pids,NewMap,ObsList,N)
+            {NewMap,MapCreatures}= simulate(Map,ObsList,MapCreatures,Delta),
+            sendState(NewMap),
+            %io:format("~p~n",[maps:to_list(NewMap)]),
+            loop(Pids,NewMap,ObsList,MapCreatures,N)
         after 0 ->
             receive
             {run,Delta} -> 
-                NewMap = simulate(Map,ObsList,Delta),
-                sendState(Map),
-                loop(Pids,NewMap,ObsList,N);
+                {NewMap,MapCreatures}= simulate(Map,ObsList,MapCreatures,Delta),
+                sendState(NewMap),
+                %io:format("~p~n",[maps:to_list(NewMap)]),
+                loop(Pids,NewMap,ObsList,MapCreatures,N);   
             {enter, Pid} ->
                         case maps:find(Pid,Pids) of
-                            {ok,Value} -> 
+                            {ok,_} -> 
                                 NewPids = Pids,
-                                NewMap = Map;
+                                NewMap = Map,
+                                error;
                             _ ->
 
                                 NewPids = maps:put(Pid,true,Pids),
@@ -43,7 +46,7 @@ loop(Pids,Map,ObsList,N)->
                         end,
                         sendObs(Pid,ObsList),
                         print("user enter"),
-                        loop(NewPids,NewMap,ObsList,N+1);
+                        loop(NewPids,NewMap,ObsList,MapCreatures,N+1);
             {line, Data, From} ->
                         Values = maps:get(From,Map), %[X,Y,VX,VY,AX,AY,A,W,Alpha,R]
                         %parse 
@@ -53,10 +56,10 @@ loop(Pids,Map,ObsList,N)->
                         %update
                         NewValues = accel(Values,Move),
                         NewMap =maps:update(From,NewValues,Map),
-                        loop(Pids,NewMap,ObsList,N);
+                        loop(Pids,NewMap,ObsList,MapCreatures,N);
             {leave, Pid} ->
                         io:format("user left~n", []),
-                        loop(maps:remove(Pid,Pids),maps:remove(Pid,Map),ObsList,N-1);
+                        loop(maps:remove(Pid,Pids),maps:remove(Pid,Map),ObsList,MapCreatures,N-1);
             {stop} -> ok
             end
         
@@ -73,40 +76,58 @@ initial(N)->
 % Accel Rot Alpha
 % Charge 1,2
 
-simulate(Map,ObsList,Delta)->
+simulate(MapPlayers,ObsList,MapCreatures,Delta)->
     %colide jogadores/jogadores
-    Fun2 = fun(Key1,_,AccIn2) -> lists:merge(AccIn2,maps:fold(fun(Key2,_,AccIn1) -> check_collisionAux(Key1,Key2,Map,AccIn1) end,[],Map)) end,
-    Collided = maps:fold(Fun2,[],Map), %devolve todos os pares de colisoes
-    lists:foreach(fun({Key1,Key2}) -> collidePlayers(Key1,Key2,Map) end,Collided),
+    Fun2 = fun(Key1,_,AccIn2) -> maps:fold(fun(Key2,_,AccIn1) -> check_collisionAux(Key1,Key2,MapPlayers,AccIn2++AccIn1) end ,[],MapPlayers) end,
+    Collided = maps:fold(Fun2,[],MapPlayers),
+    MapPlayers1 = lists:foldl(fun({Key1,Key2},AccIn) -> collidePlayers(Key1,Key2,AccIn,MapCreatures,ObsList) end,MapPlayers,Collided),
+    
     %colide jogadores/paredes
-    MapWalls = maps:fold(fun(Key,_,AccIn) -> collisionWalls(Key,AccIn) end,Map,Map),
+    MapPlayers2 = maps:fold(fun(Key,_,AccIn) -> collisionWalls(Key,AccIn) end,MapPlayers1,MapPlayers1),
 
     %colide jogadores/obstaculos
-    MapObs = maps:fold(fun(Key,_,AccIn2) -> lists:foldr(fun(Elem,AccIn1)-> collisionObs(Key,Elem,AccIn1) end, AccIn2,ObsList) end,MapWalls,MapWalls),
+    MapPlayers3 = maps:fold(fun(Key,_,AccIn2) -> lists:foldl(fun(Elem,AccIn1)-> collisionObs(Key,Elem,AccIn1) end, AccIn2,ObsList) end,MapPlayers2,MapPlayers2),
     
     %colide jogadores/criaturas
+    {MapPlayers4,MapCreatures1} = maps:fold(fun(Player,_,{PAccIn2,CAccIn2}) -> maps:fold(fun(Creature,_,{PAccIn,CAccIn}) -> collision_PlayerCreatures(Player,PAccIn,Creature,CAccIn,ObsList) end,{PAccIn2,CAccIn2},MapCreatures) end,{MapPlayers3,MapCreatures},MapPlayers3),
 
     %colide criaturas/paredes
-
+    MapCreatures2 = maps:fold(fun(Key,_,AccIn) -> collisionWalls(Key,AccIn) end,MapCreatures1,MapCreatures1),
+    
     %colide criaturas/obstaculos
-    %evolui criaturas
-    %evolui jogadores
-    maps:fold(fun(Key,Value,AccIn) -> maps:update(Key,evolve(Value,Delta),AccIn) end,MapObs,MapObs).
+    MapCreatures3 = maps:fold(fun(Key,_,AccIn2) -> lists:foldl(fun(Elem,AccIn1)-> collisionObs(Key,Elem,AccIn1) end, AccIn2,ObsList) end,MapCreatures2,MapCreatures2),
 
-check_collisionAux(Key1,Key2,Map,AccIn1)->
+    %evolui criaturas
+    NewMapCreatures = maps:fold(fun(Key,Value,AccIn) -> maps:update(Key,evolve(Value,Delta),AccIn) end,MapCreatures3,MapCreatures3),
+    %evolui jogadores
+    NewMapPlayers = maps:fold(fun(Key,Value,AccIn) -> maps:update(Key,evolve(Value,Delta),AccIn) end,MapPlayers4,MapPlayers4),
+    
+    {NewMapPlayers,NewMapCreatures}.
+
+check_collisionAux(Key1,Key2,Map,AccIn)->
     case Key1==Key2 of 
         false->
-            [X1,Y1,_,_,_,_,_,_,_,R1,_] = maps:get(Key1,Map),
-            [X2,Y2,_,_,_,_,_,_,_,R2,_] = maps:get(Key2,Map),
-            case check_collision(X1,Y1,R1,X2,Y2,R2) of
-                true->
-                    [{Key1,Key2}|AccIn1];
+            case alreadyChecked(Key1,Key2,AccIn) of
+                true ->
+                    AccIn;
                 false->
-                    AccIn1
+                    [X1,Y1,_,_,_,_,_,_,_,R1,_] = maps:get(Key1,Map),
+                    [X2,Y2,_,_,_,_,_,_,_,R2,_] = maps:get(Key2,Map),
+                    case check_collision(X1,Y1,R1,X2,Y2,R2) of
+                        true->
+                            [{Key1,Key2}|AccIn];
+                        false->
+                            AccIn
+                    end
             end;
         true ->
-            AccIn1
+            AccIn
     end.
+
+alreadyChecked(Key1,Key2,AccIn1) -> 
+    %io:format("~p~n",[AccIn1]),
+    lists:foldl(fun({Key3,Key4},AccIn) -> AccIn or ((Key1 == Key4) and (Key2 == Key3)) end,false,AccIn1).
+
 
 
 check_collision(X1,Y1,R1,X2,Y2,R2)-> 
@@ -154,12 +175,13 @@ collisionWalls(Key,Map)->
     end,
 maps:update(Key,Res,Map).
 
-collidePlayers(Key1,Key2,Map)->
-    [_,_,_,_,_,_,_,_,_,R1,_] = maps:get(Key1,Map),
-    [_,_,_,_,_,_,_,_,_,R2,_] = maps:get(Key2,Map),
+collidePlayers(Key1,Key2,MapPlayers,MapCreatures,ObsList)->
+    [_,_,_,_,_,_,_,_,_,R1,_] = maps:get(Key1,MapPlayers),
+    [_,_,_,_,_,_,_,_,_,R2,_] = maps:get(Key2,MapPlayers),
+    
     if
-        R1>R2 -> print("Key2 dead");
-        true -> print("Key1 dead")
+        R1>R2 -> generate_safespot(Key2,MapPlayers,MapCreatures,ObsList);
+        true -> generate_safespot(Key1,MapPlayers,MapCreatures,ObsList)
     end.
 
 
@@ -173,7 +195,7 @@ collision_PlayerCreatures(Player,MapPlayers,Creature,MapCreatures,ObsList)->
     Res = 
         if
         SumR>=Dist -> 
-            {[X1,Y1,VX,VY,AX,AY,A,W,Alpha,R1+Type,I],generate_safespot(Creature,MapCreatures,ObsList)};
+            {[X1,Y1,VX,VY,AX,AY,A,W,Alpha,R1+Type,I],generate_safespot(Creature,MapPlayers,MapCreatures,ObsList)};
         SumR<Dist -> {[X1,Y1,VX,VY,AX,AY,A,W,Alpha,R1,I],[X2,Y2,VX2,VY2,R2,Type]}
     end,
     {Res1,Res2} = Res,
@@ -181,8 +203,67 @@ collision_PlayerCreatures(Player,MapPlayers,Creature,MapCreatures,ObsList)->
 
 
 
-generate_safespot(Key,Map,ObsList)->
-    ok.
+
+check_collisionSpawn(X0,Y0,X1,Y1)-> 
+    Xdist = X1-X0,
+    Ydist = Y1-Y0,
+    R = 
+    if
+        (abs(Xdist) =< 200) and (abs(Ydist) =< 200) -> true;
+        true -> false
+    end,
+R.
+
+generate_safespot(Key,MapPlayers,MapCreatures,ObsList)->
+    case is_integer(Key) of
+        true ->
+            [_,_,VX0,VY0,R,T] = maps:get(Key,MapCreatures),
+            X = 1100*rand:uniform() + 100,
+            Y = 600*rand:uniform() + 100,
+            Acc = maps:fold(fun(_,[X1,Y1,_,_,_,_,_,_,_,_,_],AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,MapPlayers),
+            if
+                Acc == true -> generate_safespot(Key,MapPlayers,MapCreatures,ObsList);
+                true -> 
+                    Acc1 = lists:foldl(fun({X1,Y1,_},AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,ObsList),
+                    if
+                        Acc1 == true -> generate_safespot(Key,MapPlayers,MapCreatures,ObsList);
+                        true ->
+                            Acc2 = maps:fold(fun(_,[X1,Y1,_,_,_,_],AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,MapCreatures),
+                            if
+                                Acc2 == true -> generate_safespot(Key,MapPlayers,MapCreatures,ObsList);
+                                true ->
+                                    
+                                    maps:update(Key,[X,Y,VX0,VY0,R,T],MapCreatures)
+                            end
+                    end
+            end;
+            
+        false -> 
+            [_,_,_,_,_,_,_,_,_,R1,I] = maps:get(Key,MapPlayers),
+            X = 1100*rand:uniform() + 100,
+            Y = 600*rand:uniform() + 100,
+            
+            Acc = maps:fold(fun(_,[X1,Y1,_,_,_,_,_,_,_,_,_],AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,MapPlayers),
+            if
+                Acc == true -> generate_safespot(Key,MapPlayers,MapCreatures,ObsList);
+                true -> 
+                    Acc1 = lists:foldl(fun({X1,Y1,_},AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,ObsList),
+                    
+                    if
+                        Acc1 == true -> generate_safespot(Key,MapPlayers,MapCreatures,ObsList);
+                        true ->
+                             
+                            Acc2 = maps:fold(fun(_,[X1,Y1,_,_,_,_],AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,MapCreatures),
+                            if
+                                Acc2 == true -> generate_safespot(Key,MapPlayers,MapCreatures,ObsList);
+                                true ->
+                                    
+                                    maps:update(Key,[X,Y,0.0,0.0,0.0,0.0,0.0,0.0,0.0,R1,I],MapPlayers)
+                            end
+                    end
+            end
+        
+end.
 
 
 
@@ -197,7 +278,7 @@ evolve(Data,Delta)->
     NewW = (W*0.65)+Alpha*Dt,
     [NewX,NewY,NewVx,NewVy,Ax,Ay,NewA,NewW,Alpha,R,I].
 
-accel([X,Y,VX,VY,AX,AY,A,W,Alpha,R,I],Move)->
+accel([X,Y,VX,VY,_,_,A,W,_,R,I],Move)->
     Q = 3000,
     J = 300,
     case lists:member(<<"u">>, Move) of
@@ -239,9 +320,6 @@ sendObs(Pid,ObsList)->
     Pid ! {line, Out2},
     ok.
 
-normalize(X,Y) ->
-    S = math:sqrt(X*X+Y*Y),
-    {X/S,Y/S}.
 
 delta(Delta)->
     receive
