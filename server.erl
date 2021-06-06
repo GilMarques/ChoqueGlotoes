@@ -7,48 +7,146 @@ start()->
     {ok, LSock} = gen_tcp:listen(Port, [binary, {packet, line}, {reuseaddr, true}]),
     Test = maps:new(),
 
-    Pid = spawn(fun()-> loop(maps:new(),maps:new(),createObsList(4),maps:put(1,[50.0,50.0,100.0,100.0,0.0,0.0,0.0,0.0,0.0,10.0,10],Test),0) end),
+    Pid = spawn(fun()-> loop(maps:new(),maps:new(),createObsList(4),maps:put(1,[50.0,50.0,100.0,100.0,0.0,0.0,0.0,0.0,0.0,10.0,10],Test),{false,false,false},queue:new()) end),
     spawn(fun()-> delta(16) end),
     register(?MODULE,Pid),
-    spawn(fun() -> acceptor(LSock) end).
+    Log = spawn(fun()-> loopManager(maps:new()) end),
+    register(loginManager,Log),
+    spawn(fun() -> acceptor(LSock) end),
+    registered().
 
 acceptor(LSock) ->
     {ok, Sock} = gen_tcp:accept(LSock),
+    print("User connected"),
     spawn(fun() -> acceptor(LSock) end),
-    ?MODULE ! {enter, self()},
-    user(Sock).
+    Result = login(Sock),
+    case Result of
+        {logged,Username} ->
+            ?MODULE ! {enter, self(),Username},
+            user(Sock);
+        _ ->
+            print("User disconnected"),
+            error
+end.
 
-%Pids Map Pid -> {Password,isOnline}
-%Positions Map Pid -> Position
-%Criaturas Map 
-loop(Pids,MapPlayers,ObsList,MapCreatures,N)-> 
+login(Sock)->
+    receive
+    {tcp, _, Data} ->
+        case parseL(Data) of
+            {login,Msg} -> 
+                loginManager ! {login,Msg,self()},
+                login(Sock);
+            {register,Msg}->
+                loginManager  ! {register,Msg,self()},
+                login(Sock);
+            {error}-> login(Sock)
+            end;
+    {ok,login,Username} -> 
+    gen_tcp:send(Sock, "true\r\n"),
+    {logged,Username};
+    {ok,register} -> 
+    gen_tcp:send(Sock, "true\r\n"),
+    login(Sock);
+    {wrong_credentials} ->
+        gen_tcp:send(Sock, "false\r\n"),
+        login(Sock);
+    {error_login,account_online}->
+        gen_tcp:send(Sock, "false\r\n"),
+        login(Sock);
+    {error_register,account_exists} ->
+        gen_tcp:send(Sock, "false\r\n"),
+        login(Sock);
+    {tcp_closed, _} ->
+        closed;
+    {tcp_error, _, _} ->
+        error
+end.
+
+parseL(Data)->
+    String = binary_to_list(Data),
+    [State,_,Username,_,Password,_] = string:split(String," ",all),
+    case  string:equal(State,"Login") of 
+        true -> {login,{Username,Password}};
+        _ ->
+            case string:equal(State,"Register") of 
+                true -> {register,{Username,Password}};
+                _ -> {error}
+            end
+    end.
+
+
+% ------------------------------------------------ LOGIN MANAGER LOOP ------------------------------------------------ %
+
+loopManager(AccountMap)->
+    receive
+        {login,{Username,Password},From}-> 
+            case maps:find(Username,AccountMap) of
+                {ok,Value} -> 
+                    {Stored_Password,IsOnline} = Value,
+                    case string:equal(Stored_Password,Password) of 
+                        true ->
+                            case IsOnline of
+                                true -> From ! {error_login,account_online}, NewMap = AccountMap;
+                                _ -> NewMap = maps:update(Username,{Stored_Password,true},AccountMap),From ! {ok,login,Username}
+                            end;
+                        _ -> From ! {wrong_credentials}, NewMap = AccountMap
+                    end;
+                _ ->
+                    From ! {wrong_credentials}, NewMap = AccountMap
+            end,
+            loopManager(NewMap);
+        {register,{Username,Password},From}-> 
+            case maps:find(Username,AccountMap) of
+                {ok,_} -> 
+                    From ! {error_register,account_exists}, NewMap = AccountMap;
+                _ ->
+                    From ! {ok,register},
+                    NewMap = maps:put(Username,{Password,false},AccountMap)                   
+            end,
+            loopManager(NewMap);
+        {leave,Username} ->
+            {Password,_} = maps:get(Username,AccountMap),
+            NewMap = maps:update(Username,{Password,false},AccountMap),
+            loopManager(NewMap)
+end.
+
+
+% ----------------------------------------------------- GAME LOOP ---------------------------------------------------- %
+
+loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)-> 
     receive %high priority
         {run,Delta}->
             {NewMapPlayers,NewMapCreatures}= simulate(MapPlayers,ObsList,MapCreatures,Delta),
             sendState(NewMapPlayers,NewMapCreatures),
             %io:format("~p~n",[maps:to_list(NewMap)]),
-            loop(Pids,NewMapPlayers,ObsList,MapCreatures,N)
+            loop(Pids,NewMapPlayers,ObsList,MapCreatures,PlayerIds,Queue)
         after 0 ->
             receive
             {run,Delta} -> 
                 {NewMapPlayers,NewMapCreatures}= simulate(MapPlayers,ObsList,MapCreatures,Delta),
                 sendState(NewMapPlayers,NewMapCreatures),
                 %io:format("~p~n",[maps:to_list(NewMapCreatures)]),
-                loop(Pids,NewMapPlayers,ObsList,NewMapCreatures,N);   
-            {enter, Pid} ->
-                        case maps:find(Pid,Pids) of
-                            {ok,_} -> 
+                loop(Pids,NewMapPlayers,ObsList,NewMapCreatures,PlayerIds,Queue);   
+            
+            {enter, Pid,Username} ->
+                        print("User enter"),
+                        Size = maps:size(Pids),
+                        if
+                            Size < 3->
+                                NewPids = maps:put(Pid,{Username,0},Pids),
+                                {N,NewPlayerIds} = getId(PlayerIds), 
+                                NeMapPlayers = maps:put(Pid,[50.0,50.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,20.0, 0],MapPlayers),
+                                NewMapPlayers = maps:put(Pid,initial(Pid,NeMapPlayers,MapCreatures,ObsList,N),NeMapPlayers),
+                                NewQueue = Queue;
+                            true -> 
+                                NewPlayerIds = PlayerIds,
                                 NewPids = Pids,
                                 NewMapPlayers = MapPlayers,
-                                error;
-                            _ ->
-
-                                NewPids = maps:put(Pid,true,Pids),
-                                NewMapPlayers = maps:put(Pid,initial(N+1),MapPlayers)
+                                NewQueue = queue:in({Pid,Username},Queue)                            
                         end,
                         sendObs(Pid,ObsList),
-                        print("user enter"),
-                        loop(NewPids,NewMapPlayers,ObsList,MapCreatures,N+1);
+                        
+                        loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,NewQueue);
             {line, Data, From} ->
                         Values = maps:get(From,MapPlayers), %[X,Y,VX,VY,AX,AY,A,W,Alpha,R]
                         %parse 
@@ -58,16 +156,42 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,N)->
                         %update
                         NewValues = accel(Values,Move),
                         NewMapPlayers =maps:update(From,NewValues,MapPlayers),
-                        loop(Pids,NewMapPlayers,ObsList,MapCreatures,N);
+                        loop(Pids,NewMapPlayers,ObsList,MapCreatures,PlayerIds,Queue);
             {leave, Pid} ->
-                        io:format("user left~n", []),
-                        loop(maps:remove(Pid,Pids),maps:remove(Pid,MapPlayers),ObsList,MapCreatures,N-1);
+                {Username,_} = maps:get(Pid,Pids),
+                loginManager ! {leave,Username},
+                print("User left"),
+                        RemovedPid = maps:remove(Pid,Pids),
+                        [_,_,_,_,_,_,_,_,_,_,I]= maps:get(Pid,MapPlayers),
+                        RemovedPlayer = maps:remove(Pid,MapPlayers),
+                        {X,Y,Z} = PlayerIds,
+                        RPlayerIds =if
+                            I==1 -> {false,Y,Z};
+                            I==2 -> {X,false,Z};
+                            I==3 -> {X,Y,false}
+                        end,
+                        case queue:is_empty(Queue) of
+                            false ->
+                                {value,{NewPid,Username},NewQueue} = queue:out(Queue),
+                                NewPids = maps:put(NewPid,{Username,0},RemovedPid),
+                                {N,NewPlayerIds} = getId(RPlayerIds),
+                                NeMapPlayers = maps:put(NewPid,[50.0,50.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,20.0, 0],RemovedPlayer),
+                                NewMapPlayers = maps:put(NewPid,initial(Pid,MapPlayers,MapCreatures,ObsList,N),NeMapPlayers);
+                            true ->
+                                NewPlayerIds = RPlayerIds,
+                                NewQueue = Queue,
+                                NewPids = RemovedPid,
+                                NewMapPlayers = RemovedPlayer
+                        end,
+                        
+                        loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,NewQueue);
             {stop} -> ok
             end
 end.
 
-initial(N)->
-    [50.0,50.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,20.0, integer_to_list(N)].
+initial(Key,MapPlayers,MapCreatures,ObsList,N)->
+    [X,Y,VX,VY,AX,AY,A,W,Alpha,R1,_] = generate_safespot(Key,MapPlayers,MapCreatures,ObsList),
+    [X,Y,VX,VY,AX,AY,A,W,Alpha,R1,N].
 %Player ->
 % Pos X,Y
 % Vel X,Y
@@ -76,6 +200,17 @@ initial(N)->
 % Vel Rot W
 % Accel Rot Alpha
 % Charge 1,2
+
+getId(N)->
+    {X,Y,Z} = N,
+    if
+        X == false ->
+            {1,{true,Y,Z}};
+        Y == false ->
+            {2,{X,true,Z}};
+        Z == false ->
+            {3,{X,Y,true}}
+    end. 
 
 simulate(MapPlayers,ObsList,MapCreatures,Delta)->
     %colide jogadores/jogadores
@@ -315,7 +450,7 @@ accel([X,Y,VX,VY,_,_,A,W,_,R,I],Move)->
     
 
 sendState(MapPlayers,MapCreatures)->
-    List = maps:fold(fun(_,[X,Y,_,_,_,_,A,_,_,R,I],AccIn) -> [I, io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[A]),io_lib:format("~.3f",[R]) | AccIn] end,[],MapPlayers),
+    List = maps:fold(fun(_,[X,Y,_,_,_,_,A,_,_,R,I],AccIn) -> [integer_to_list(I), io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[A]),io_lib:format("~.3f",[R]) | AccIn] end,[],MapPlayers),
     Pids = maps:keys(MapPlayers),
     String1 = string:join(List," "),
 
@@ -370,5 +505,5 @@ createObsList(N)->
 
 newObs()->
     R = 20.0*rand:uniform()+100.0,
-    io:format("~p~n",[R]),
+    %io:format("~p~n",[R]),
     {1000*rand:uniform()+200,600*rand:uniform()+100, R}.
