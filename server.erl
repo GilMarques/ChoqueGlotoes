@@ -272,7 +272,7 @@ evolve(Data,Delta)->
     Dt = Delta*(1/1000),
     NewX = X+Vx*Dt,
     NewY = Y+Vy*Dt,
-    NewVx = (Vx*0.9)+Ax*Dt,
+    NewVx = (Vx*0.9)+Ax*Dt, %Velocidade máxima depende do TAMANHO, A agilidade é indepente do tamanho, diminuindo com o tempo até limite minimo
     NewVy = (Vy*0.9)+Ay*Dt,
     NewA = A+W*Dt,
     NewW = (W*0.65)+Alpha*Dt,
@@ -328,7 +328,6 @@ sendState(MapPlayers,MapCreatures)->
 
 sendObs(Pid,ObsList)->
     List = lists:foldl(fun({X,Y,S},AccIn) -> [io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[S]) | AccIn]  end,[],ObsList),
-    
     Out = string:join(List," "),
     Out2 = string:concat(Out,"\r\n"),
     Pid ! {line, Out2},
@@ -353,6 +352,8 @@ user(Sock) ->
         {tcp, _, Data} ->
             ?MODULE ! {line, Data,self()},
             user(Sock);
+        {leave} ->
+            gen_tcp:send(Sock,"RIP\r\n");
         {tcp_closed, _} ->
             ?MODULE ! {leave, self()};
         {tcp_error, _, _} ->
