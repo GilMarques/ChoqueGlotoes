@@ -7,7 +7,7 @@ start()->
     {ok, LSock} = gen_tcp:listen(Port, [binary, {packet, line}, {reuseaddr, true}]),
     Test = maps:new(),
 
-    Pid = spawn(fun()-> loop(maps:new(),maps:new(),createObsList(4),maps:put(1,[50.0,50.0,100.0,100.0,0.0,0.0,0.0,0.0,0.0,10.0,10],Test),{false,false,false},queue:new()) end),
+    Pid = spawn(fun()-> loop(maps:new(),maps:new(),createObsList(4),maps:put(1,[50.0,50.0,100.0,100.0,off,0.0,0.0,off,10.0,0.0,0.0,10],Test),{false,false,false},queue:new()) end),
     spawn(fun()-> delta(16) end),
     register(?MODULE,Pid),
     Log = spawn(fun()-> loopManager(maps:new()) end),
@@ -87,7 +87,7 @@ loopManager(AccountMap)->
                         true ->
                             case IsOnline of
                                 true -> From ! {error_login,account_online}, NewMap = AccountMap;
-                                _ -> NewMap = maps:update(Username,{Stored_Password,true},AccountMap),From ! {ok,login,Username}
+                                _ -> NewMap = maps:update(Username,{Stored_Password,true},AccountMap),From ! {ok,login,Username},io:format("~p logged in~n",[Username])
                             end;
                         _ -> From ! {wrong_credentials}, NewMap = AccountMap
                     end;
@@ -105,10 +105,13 @@ loopManager(AccountMap)->
             end,
             loopManager(NewMap);
         {leave,Username} ->
+            io:format("~p logged out~n",[Username]),
             {Password,_} = maps:get(Username,AccountMap),
             NewMap = maps:update(Username,{Password,false},AccountMap),
             loopManager(NewMap)
 end.
+
+
 
 
 % ----------------------------------------------------- GAME LOOP ---------------------------------------------------- %
@@ -123,9 +126,10 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)->
         after 0 ->
             receive
             {run,Delta} -> 
+                %io:format("~p~n",[maps:to_list(MapPlayers)]),
                 {NewMapPlayers,NewMapCreatures}= simulate(MapPlayers,ObsList,MapCreatures,Delta),
                 sendState(NewMapPlayers,NewMapCreatures),
-                %io:format("~p~n",[maps:to_list(NewMapCreatures)]),
+                
                 loop(Pids,NewMapPlayers,ObsList,NewMapCreatures,PlayerIds,Queue);   
             
             {enter, Pid,Username} ->
@@ -135,7 +139,7 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)->
                             Size < 3->
                                 NewPids = maps:put(Pid,{Username,0},Pids),
                                 {N,NewPlayerIds} = getId(PlayerIds), 
-                                NeMapPlayers = maps:put(Pid,[50.0,50.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,20.0, 0],MapPlayers),
+                                NeMapPlayers = maps:put(Pid,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0}, 0],MapPlayers),
                                 NewMapPlayers = maps:put(Pid,initial(Pid,NeMapPlayers,MapCreatures,ObsList,N),NeMapPlayers),
                                 NewQueue = Queue;
                             true -> 
@@ -162,7 +166,7 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)->
                 loginManager ! {leave,Username},
                 print("User left"),
                         RemovedPid = maps:remove(Pid,Pids),
-                        [_,_,_,_,_,_,_,_,_,_,I]= maps:get(Pid,MapPlayers),
+                        [_,_,_,_,_,_,_,_,_,_,_,_,I]= maps:get(Pid,MapPlayers),
                         RemovedPlayer = maps:remove(Pid,MapPlayers),
                         {X,Y,Z} = PlayerIds,
                         RPlayerIds =if
@@ -175,7 +179,7 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)->
                                 {value,{NewPid,Username},NewQueue} = queue:out(Queue),
                                 NewPids = maps:put(NewPid,{Username,0},RemovedPid),
                                 {N,NewPlayerIds} = getId(RPlayerIds),
-                                NeMapPlayers = maps:put(NewPid,[50.0,50.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,20.0, 0],RemovedPlayer),
+                                NeMapPlayers = maps:put(NewPid,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0}, 0],RemovedPlayer),
                                 NewMapPlayers = maps:put(NewPid,initial(Pid,MapPlayers,MapCreatures,ObsList,N),NeMapPlayers);
                             true ->
                                 NewPlayerIds = RPlayerIds,
@@ -183,15 +187,15 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)->
                                 NewPids = RemovedPid,
                                 NewMapPlayers = RemovedPlayer
                         end,
-                        
+                                                
                         loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,NewQueue);
             {stop} -> ok
             end
 end.
 
 initial(Key,MapPlayers,MapCreatures,ObsList,N)->
-    [X,Y,VX,VY,AX,AY,A,W,Alpha,R1,_] = generate_safespot(Key,MapPlayers,MapCreatures,ObsList),
-    [X,Y,VX,VY,AX,AY,A,W,Alpha,R1,N].
+    [X,Y,VX,VY,AccelL,A,W,AccelR,R1,Agility,Batteries,_] = generate_safespot(Key,MapPlayers,MapCreatures,ObsList),
+    [X,Y,VX,VY,AccelL,A,W,AccelR,R1,Agility,Batteries,N].
 %Player ->
 % Pos X,Y
 % Vel X,Y
@@ -214,9 +218,8 @@ getId(N)->
 
 simulate(MapPlayers,ObsList,MapCreatures,Delta)->
     %colide jogadores/jogadores
-    Fun2 = fun(Key1,_,AccIn2) -> maps:fold(fun(Key2,_,AccIn1) -> check_collisionAux(Key1,Key2,MapPlayers,AccIn2++AccIn1) end ,[],MapPlayers) end,
-    Collided = maps:fold(Fun2,[],MapPlayers),
-    MapPlayers1 = lists:foldl(fun({Key1,Key2},AccIn) -> collidePlayers(Key1,Key2,AccIn,MapCreatures,ObsList) end,MapPlayers,Collided),
+    
+    MapPlayers1 = maps:fold(fun(Player1,_,AccIn2) -> maps:fold(fun(Player2,_,AccIn1) -> collidePlayers(Player1,Player2,AccIn1,MapCreatures,ObsList) end ,AccIn2,MapPlayers) end,MapPlayers,MapPlayers),
     
     %colide jogadores/paredes
     MapPlayers2 = maps:fold(fun(Key,_,AccIn) -> collisionWalls(Key,AccIn) end,MapPlayers1,MapPlayers1),
@@ -239,47 +242,10 @@ simulate(MapPlayers,ObsList,MapCreatures,Delta)->
     
     {NewMapPlayers,NewMapCreatures}.
 
-check_collisionAux(Key1,Key2,Map,AccIn)->
-    case Key1==Key2 of 
-        false->
-            case alreadyChecked(Key1,Key2,AccIn) of
-                true ->
-                    AccIn;
-                false->
-                    [X1,Y1,_,_,_,_,_,_,_,R1,_] = maps:get(Key1,Map),
-                    [X2,Y2,_,_,_,_,_,_,_,R2,_] = maps:get(Key2,Map),
-                    case check_collision(X1,Y1,R1,X2,Y2,R2) of
-                        true->
-                            [{Key1,Key2}|AccIn];
-                        false->
-                            AccIn
-                    end
-            end;
-        true ->
-            AccIn
-    end.
-
-alreadyChecked(Key1,Key2,AccIn1) -> 
-    %io:format("~p~n",[AccIn1]),
-    lists:foldl(fun({Key3,Key4},AccIn) -> AccIn or ((Key1 == Key4) and (Key2 == Key3)) end,false,AccIn1).
-
-
-
-check_collision(X1,Y1,R1,X2,Y2,R2)-> 
-    Xdist = X2-X1,
-    Ydist = Y2-Y1,
-    Dist = math:sqrt((Xdist*Xdist) + (Ydist*Ydist)),
-    SumR = R1+R2,
-    R = 
-    if
-        SumR>=Dist -> true;
-        SumR<Dist -> false
-    end,
-R.
 
 
 collisionObs(Key,Obs,Map) ->
-    [X,Y,VX,VY,AX,AY,A,W,Alpha,R,I] = maps:get(Key,Map),
+    [X,Y,VX,VY,AccelL,A,W,AccelR,R,Agility,Batteries,I] = maps:get(Key,Map),
     {X0,Y0,R0} = Obs,
     XDist = X-X0,
     YDist = Y-Y0,
@@ -293,50 +259,77 @@ collisionObs(Key,Obs,Map) ->
             DPTan =  VX*TangentX + VY*TangentY,
             NewVX = 1.4*TangentX * DPTan - 0.7*VX,
             NewVY =1.4*TangentY * DPTan - 0.7*VY,
-            [X+1.5*NewVX*(16/1000), Y+1.5*NewVY*(16/1000),NewVX,NewVY,AX,AY,A,W,Alpha,R,I];
-        true -> [X,Y,VX,VY,AX,AY,A,W,Alpha,R,I]    
+            [X+1.5*NewVX*(16/1000), Y+1.5*NewVY*(16/1000),NewVX,NewVY,AccelL,A,W,AccelR,R,Agility,Batteries,I];
+        true -> [X,Y,VX,VY,AccelL,A,W,AccelR,R,Agility,Batteries,I]    
     end,
     maps:update(Key,Res,Map).
 
 collisionWalls(Key,Map)->
-    [X,Y,VX,VY,AX,AY,A,W,Alpha,R,I] = maps:get(Key,Map),
+    [X,Y,VX,VY,AccelL,A,W,AccelR,R,Agility,Batteries,I] = maps:get(Key,Map),
     Res =
     if
-        X-R =< 0 -> [X+0.5,Y,-VX,VY,AX,AY,A,W,Alpha,R,I];
-        Y-R =< 0 ->  [X,Y+0.5,VX,-VY,AX,AY,A,W,Alpha,R,I];
-        Y+R >= 720 ->  [X,Y-0.5,VX,-VY,AX,AY,A,W,Alpha,R,I];
-        X+R >= 1280 ->  [X-0.5,Y,-VX,VY,AX,AY,A,W,Alpha,R,I];
-        true -> [X,Y,VX,VY,AX,AY,A,W,Alpha,R,I]
+        X-R =< 0 -> [X+abs(X-R),Y,-VX,VY,AccelL,A,W,AccelR,R,Agility,Batteries,I];
+        Y-R =< 0 ->  [X,Y+abs(Y-R),VX,-VY,AccelL,A,W,AccelR,R,Agility,Batteries,I];
+        Y+R >= 720 ->  [X,Y-abs(720-Y-R),VX,-VY,AccelL,A,W,AccelR,R,Agility,Batteries,I];
+        X+R >= 1280 ->  [X-abs(1280-X-R),Y,-VX,VY,AccelL,A,W,AccelR,R,Agility,Batteries,I];
+        true -> [X,Y,VX,VY,AccelL,A,W,AccelR,R,Agility,Batteries,I]
     end,
 maps:update(Key,Res,Map).
 
 collidePlayers(Key1,Key2,MapPlayers,MapCreatures,ObsList)->
-    [_,_,_,_,_,_,_,_,_,R1,_] = maps:get(Key1,MapPlayers),
-    [_,_,_,_,_,_,_,_,_,R2,_] = maps:get(Key2,MapPlayers),
-    
-    if
-        R1>R2 -> generate_safespot(Key2,MapPlayers,MapCreatures,ObsList);
-        true -> generate_safespot(Key1,MapPlayers,MapCreatures,ObsList)
+    io:format("~p~n",[MapPlayers]),
+    if 
+        not(Key1 == Key2)->
+            [X1,Y1,_,_,_,_,_,_,R1,_,_,_] = maps:get(Key1,MapPlayers),
+            [X2,Y2,_,_,_,_,_,_,R2,_,_,_] = maps:get(Key2,MapPlayers),
+            Xdist = X2-X1,
+            Ydist = Y2-Y1,
+            Dist = math:sqrt((Xdist*Xdist) + (Ydist*Ydist)),
+            SumR = R1+R2,
+            
+            if
+                SumR>=Dist -> 
+                    if
+                        R1>R2 -> 
+                            if
+                                R2 =< 10.0 ->
+                                    Key2 ! {leave},
+                                    ok;
+                                true->
+                                    ok
+                            end,
+                            maps:update(Key2,generate_safespot(Key2,MapPlayers,MapCreatures,ObsList),MapPlayers);
+                        true ->
+                            if
+                                R1 =< 10.0 ->
+                                    Key1 ! {leave};
+                                true->
+                                    ok
+                            end,  
+                            maps:update(Key1,generate_safespot(Key1,MapPlayers,MapCreatures,ObsList),MapPlayers)
+                    end;
+                SumR<Dist -> MapPlayers
+            end;
+        true -> MapPlayers
     end.
+    
 
 
 collision_PlayerCreatures(Player,MapPlayers,Creature,MapCreatures,ObsList)->
-    [X1,Y1,VX,VY,AX,AY,A,W,Alpha,R1,I] = maps:get(Player,MapPlayers),
-    [X2,Y2,VX2,VY2,AX2,AY2,A2,W2,Alpha2,R2,Type] = maps:get(Creature,MapCreatures), %[X,Y,VX,VY,R],
+    [X1,Y1,VX,VY,AccelL,A,W,AccelR,R1,Agility1,Batteries1,I] = maps:get(Player,MapPlayers),
+    [X2,Y2,VX2,VY2,AccelL2,A2,W2,AccelR2,R2,Agility2,Batteries2,Type] = maps:get(Creature,MapCreatures), %[X,Y,VX,VY,R],
     SumR = R1+R2,
     XDist = X2-X1,
-    YDist = Y2-Y2,
+    YDist = Y2-Y1,
     Dist = math:sqrt((XDist*XDist) + (YDist*YDist)),
     Res = 
         if
         SumR>=Dist -> 
-            {[X1,Y1,VX,VY,AX,AY,A,W,Alpha,R1+Type,I],generate_safespot(Creature,MapPlayers,MapCreatures,ObsList)};
-        SumR<Dist -> {[X1,Y1,VX,VY,AX,AY,A,W,Alpha,R1,I],[X2,Y2,VX2,VY2,AX2,AY2,A2,W2,Alpha2,R2,Type]}
+            {[X1,Y1,VX,VY,AccelL,A,W,AccelR,R1+Type,Agility1,Batteries1,I],generate_safespot(Creature,MapPlayers,MapCreatures,ObsList)};
+        SumR<Dist -> {[X1,Y1,VX,VY,AccelL,A,W,AccelR,R1,Agility1,Batteries1,I],[X2,Y2,VX2,VY2,AccelL2,A2,W2,AccelR2,R2,Agility2,Batteries2,Type]}
     end,
     {Res1,Res2} = Res,
     {maps:update(Player,Res1,MapPlayers),maps:update(Creature,Res2,MapCreatures)}.
-
-
 
 
 check_collisionSpawn(X0,Y0,X1,Y1)-> 
@@ -352,10 +345,10 @@ R.
 generate_safespot(Key,MapPlayers,MapCreatures,ObsList)->
     case is_integer(Key) of
         true ->
-            [_,_,VX0,VY0,AX2,AY2,A2,W2,Alpha2,R2,Type] = maps:get(Key,MapCreatures),
+            [_,_,VX0,VY0,AccelL,A2,W2,AccelR,R2,Agility,Batteries,Type] = maps:get(Key,MapCreatures),
             X = 1100*rand:uniform() + 100,
             Y = 600*rand:uniform() + 100,
-            Acc = maps:fold(fun(_,[X1,Y1,_,_,_,_,_,_,_,_,_],AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,MapPlayers),
+            Acc = maps:fold(fun(_,[X1,Y1,_,_,_,_,_,_,_,_,_,_],AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,MapPlayers),
             if
                 Acc == true -> generate_safespot(Key,MapPlayers,MapCreatures,ObsList);
                 true -> 
@@ -363,22 +356,22 @@ generate_safespot(Key,MapPlayers,MapCreatures,ObsList)->
                     if
                         Acc1 == true -> generate_safespot(Key,MapPlayers,MapCreatures,ObsList);
                         true ->
-                            Acc2 = maps:fold(fun(_,[X1,Y1,_,_,_,_,_,_,_,_,_],AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,MapCreatures),
+                            Acc2 = maps:fold(fun(_,[X1,Y1,_,_,_,_,_,_,_,_,_,_],AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,MapCreatures),
                             if
                                 Acc2 == true -> generate_safespot(Key,MapPlayers,MapCreatures,ObsList);
                                 true ->
                                     
-                                   [X,Y,VX0,VY0,AX2,AY2,A2,W2,Alpha2,R2,Type]
+                                   [X,Y,VX0,VY0,AccelL,A2,W2,AccelR,R2,Agility,Batteries,Type]
                             end
                     end
             end;
             
         false -> 
-            [_,_,_,_,_,_,_,_,_,R1,I] = maps:get(Key,MapPlayers),
+            [_,_,_,_,_,_,_,_,R1,_,Batteries,I] = maps:get(Key,MapPlayers),
             X = 1100*rand:uniform() + 100,
             Y = 600*rand:uniform() + 100,
-            
-            Acc = maps:fold(fun(_,[X1,Y1,_,_,_,_,_,_,_,_,_],AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,MapPlayers),
+                                  
+            Acc = maps:fold(fun(_,[X1,Y1,_,_,_,_,_,_,_,_,_,_],AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,MapPlayers),
             if
                 Acc == true -> generate_safespot(Key,MapPlayers,MapCreatures,ObsList);
                 true -> 
@@ -388,73 +381,142 @@ generate_safespot(Key,MapPlayers,MapCreatures,ObsList)->
                         Acc1 == true -> generate_safespot(Key,MapPlayers,MapCreatures,ObsList);
                         true ->
                              
-                            Acc2 = maps:fold(fun(_,[X1,Y1,_,_,_,_,_,_,_,_,_],AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,MapCreatures),
+                            Acc2 = maps:fold(fun(_,[X1,Y1,_,_,_,_,_,_,_,_,_,_],AccIn) -> AccIn or check_collisionSpawn(X1,Y1,X,Y) end,false,MapCreatures),
                             if
                                 Acc2 == true -> generate_safespot(Key,MapPlayers,MapCreatures,ObsList);
                                 true ->
                                     
-                                    [X,Y,0.0,0.0,0.0,0.0,0.0,0.0,0.0,R1,I]
+                                    [X,Y,0.0,0.0,off,0.0,0.0,off,R1,3000,Batteries,I]
                             end
                     end
             end
         
 end.
 
-
+% ------------------------------------------------------ EVOLVE ------------------------------------------------------ %
 
 evolve(Data,Delta)->
-    [X,Y,Vx,Vy,Ax,Ay,A,W,Alpha,R,I] = Data,
+    [X,Y,Vx,Vy,AccelL,A,W,AccelR,R,Agility,Batteries,I] = Data,
     Dt = Delta*(1/1000),
     NewX = X+Vx*Dt,
     NewY = Y+Vy*Dt,
-    NewVx = (Vx*0.9)+Ax*Dt, %Velocidade máxima depende do TAMANHO, A agilidade é indepente do tamanho, diminuindo com o tempo até limite minimo
-    NewVy = (Vy*0.9)+Ay*Dt,
+    VMax = 200.0,
+    {LBattery,RBattery,MBattery}= Batteries,
+    NewMBattery =
+        if
+        (AccelL == on) and (MBattery >= 15) -> Ax = Agility*math:cos(A),
+                                            Ay = Agility*math:sin(A),
+                                            MBattery - 1;
+        true -> Ax = 0.0,Ay = 0.0,
+        MBattery
+    end,
+
+    {NewLBattery,NewRBattery} = 
+        if
+        (AccelR == left) and (LBattery >= 15) -> Alpha = -300,
+                                            {LBattery-1,RBattery};
+
+        (AccelR == left) and (LBattery < 15) -> Alpha = 0,
+                                            {LBattery,RBattery};
+        
+        
+        
+        (AccelR == right) and (RBattery >= 15) -> Alpha = 300,
+                                            {LBattery,RBattery-1};
+
+        (AccelR == right) and (RBattery < 15) -> Alpha = 0,
+                                            {LBattery,RBattery};
+        
+        true -> Alpha = 0,
+                        {LBattery,RBattery}
+    end,
+
+
+
+    NewVx = if
+        (Vx*0.9)+Ax*Dt >= -0.5*R + VMax -> -0.5*R + VMax;
+        (Vx*0.9)+Ax*Dt =< -1*(-0.5*R + VMax) -> -1*(-0.5*R + VMax);
+        true -> (Vx*0.9)+Ax*Dt
+    end,
+    %Velocidade máxima depende do TAMANHO, A agilidade é indepente do tamanho, diminuindo com o tempo até limite minimo
+    NewVy = if
+        (Vy*0.9)+Ay*Dt >= -0.5*R + VMax -> 
+            -0.5*R + VMax;
+        (Vy*0.9)+Ay*Dt =<  -1*(-0.5*R + VMax) ->
+             -1*(-0.5*R + VMax);
+        true -> (Vy*0.9)+Ay*Dt
+    end,
+
+
     NewA = A+W*Dt,
     NewW = (W*0.65)+Alpha*Dt,
-    [NewX,NewY,NewVx,NewVy,Ax,Ay,NewA,NewW,Alpha,R,I].
+    
+    NewR = if 
+        R =< 10.0 ->  10.0;
+        true ->  R-Dt
+    end,
+
+    NewAgility = if 
+        Agility =< 1000.0 ->  1000.0;
+        true ->  Agility-Dt
+    end,
+
+    
+    NewNewLBattery = if 
+        NewLBattery+10*Dt =< 100.0 ->  NewLBattery+10*Dt;
+        true ->  100.0
+    end,
+
+    NewNewRBattery = if 
+        NewRBattery+10*Dt =< 100.0 ->  NewRBattery+10*Dt;
+        true ->  100.0
+    end,
+
+    NewNewMBattery = if 
+        NewMBattery+10*Dt =< 100.0 ->  NewMBattery+10*Dt;
+        true ->  100.0
+    end,
+    NewBatteries = {NewNewLBattery,NewNewRBattery,NewNewMBattery},
+    [NewX,NewY,NewVx,NewVy,AccelL,NewA,NewW,AccelR,NewR,NewAgility,NewBatteries,I].
 
 
 evolveCreature(Data,Delta)->
-    [X,Y,Vx,Vy,_,_,_,_,_,R,I] = Data,
+    [X,Y,Vx,Vy,_,_,_,_,R,Agility,Batteries,I] = Data,
     Dt = Delta*(1/1000),
     NewX = X+Vx*Dt,
     NewY = Y+Vy*Dt,
     NewVx = Vx,
     NewVy = Vy,
-    [NewX,NewY,NewVx,NewVy,0.0,0.0,0.0,0.0,0.0,R,I].
+    [NewX,NewY,NewVx,NewVy,off,0.0,0.0,off,R,Agility,Batteries,I].
 
-accel([X,Y,VX,VY,_,_,A,W,_,R,I],Move)->
-    Q = 3000,
-    J = 300,
+accel([X,Y,VX,VY,_,A,W,_,R,Agility,Batteries,I],Move)->
     case lists:member(<<"u">>, Move) of
         true ->
-            NewAX = Q*math:cos(A),
-            NewAY = Q*math:sin(A);
+            AccelL = on;
         _ ->
-            NewAX = 0.0,
-            NewAY = 0.0
+            AccelL = off
     end,
     case lists:member(<<"l">>, Move) of
         true->
-            NewAlpha = -J;
+            AccelR = left;
         _ ->
             case lists:member(<<"r">>, Move) of
                 true->
-                    NewAlpha = J;
+                    AccelR = right;
                 _ ->
-                    NewAlpha = 0.0
+                    AccelR = off
             end
     end,
     
-[X,Y,VX,VY,NewAX,NewAY,A,W,NewAlpha,R,I].
+[X,Y,VX,VY,AccelL,A,W,AccelR,R,Agility,Batteries,I].
     
 
 sendState(MapPlayers,MapCreatures)->
-    List = maps:fold(fun(_,[X,Y,_,_,_,_,A,_,_,R,I],AccIn) -> [integer_to_list(I), io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[A]),io_lib:format("~.3f",[R]) | AccIn] end,[],MapPlayers),
+    List = maps:fold(fun(_,[X,Y,_,_,_,A,_,_,R,_,_,I],AccIn) -> [integer_to_list(I), io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[A]),io_lib:format("~.3f",[R]) | AccIn] end,[],MapPlayers),
     Pids = maps:keys(MapPlayers),
     String1 = string:join(List," "),
 
-    List2 = maps:fold(fun(_,[X,Y,_,_,_,_,A,_,_,R,_],AccIn) -> [io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[A]),io_lib:format("~.3f",[R]) | AccIn] end,[],MapCreatures),
+    List2 = maps:fold(fun(_,[X,Y,_,_,_,A,_,_,R,_,_,_],AccIn) -> [io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[A]),io_lib:format("~.3f",[R]) | AccIn] end,[],MapCreatures),
     String2 =  string:join(List2," "),
     Out = String1 ++ " Creatures " ++ String2,
     Out2 = string:concat(Out,"\r\n"),

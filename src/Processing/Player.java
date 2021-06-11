@@ -26,11 +26,11 @@ public class Player {
     }
 
     public void draw() {
-        p.ellipse(pos.x + 2*radius * PApplet.cos(angle), pos.y + 2*radius * PApplet.sin(angle), 1, 1);
+        p.ellipse(pos.x + radius * PApplet.cos(angle), pos.y +radius * PApplet.sin(angle), radius/2, radius/2);
         p.pushMatrix();
         p.rotate(angle);
         p.popMatrix();
         p.fill(red,green,blue,50f);
-        p.ellipse(pos.x, pos.y, radius*2, radius*2);
+        p.circle(pos.x, pos.y, radius*2);
     }
 }

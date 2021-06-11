@@ -11,6 +11,7 @@ public class MainProcessing extends PApplet {
     Login log;
     Button logger;
     Button register;
+    Battery b;
     private boolean up, left, right;
     private final ArrayList<Player> players = new ArrayList<Player>();
     private final ArrayList<Obstacle> obstacles = new ArrayList<Obstacle>();
@@ -30,16 +31,13 @@ public class MainProcessing extends PApplet {
 
         logger = new Button(width/3,50,400,200,"Login");
         register = new Button(width/3,300,400,200,"Register");
-
-
+        //b = new Battery(40,40, 300,400);
         players.add(new Player());
         players.add(new Player());
         players.add(new Player());
         creatures.add(new Player());
-
         rectMode(CORNER);
         textAlign(LEFT);
-
         l = new Link();
         l.connect("localhost", 5026);
         log = new Login(l,obstacles);
@@ -48,6 +46,7 @@ public class MainProcessing extends PApplet {
 
     public void draw() {
         background(255);
+        //b.draw();
         String r;
         logger.isOver(mouseX,mouseY);
         register.isOver(mouseX,mouseY);

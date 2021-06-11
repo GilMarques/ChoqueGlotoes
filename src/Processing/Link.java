@@ -25,7 +25,7 @@ public class Link {
     }
 
     public void write(String s){
-        System.out.println("Write: "+s);
+        //System.out.println("Write: "+s);
         pw.println(s);
         pw.flush();
     }
@@ -34,7 +34,7 @@ public class Link {
         String str;
         try{
             str = in.readLine();
-            System.out.println("Read: "+str);
+            //System.out.println("Read: "+str);
         } catch(Exception e){
             return null;}
         return str;

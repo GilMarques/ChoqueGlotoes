@@ -14,6 +14,7 @@ public class Login {
     final int stateWaitLogin = 5;
     final int stateWaitRegister = 6;
     final int stateGame = 7;
+    private final ArrayList<Obstacle> obstacles;
     PApplet p = MainProcessing.processing;
     TextBox loginbox;
     TextBox loginpassbox;
@@ -25,8 +26,8 @@ public class Login {
     String resultRegister = "/";
     String resultRPassword = "/";
     Link l;
-    private final ArrayList<Obstacle> obstacles;
-    Login(Link x,ArrayList<Obstacle> y){
+
+    Login(Link x, ArrayList<Obstacle> y) {
         l = x;
         obstacles = y;
     }
@@ -34,27 +35,27 @@ public class Login {
     void instantiateBoxes() {
         loginbox = new TextBox(
                 "Please enter your name: ",
-                 p.width / 3, p.height / 4 + p.height / 16,
+                p.width / 3, p.height / 4 + p.height / 16,
                 p.width / 3, p.height / 2 - p.height / 4 - p.height / 8,
-                215,false);
+                215, false);
 
         loginpassbox = new TextBox(
                 "Please enter your password: ",
-                 p.width / 3, p.height / 4 + p.height / 16,
+                p.width / 3, p.height / 4 + p.height / 16,
                 p.width / 3, p.height / 2 - p.height / 4 - p.height / 8,
-                215,true);
+                215, true);
 
         registerpassbox = new TextBox(
                 "Please enter your password: ",
-                 p.width / 3, p.height / 4 + p.height / 16,
+                p.width / 3, p.height / 4 + p.height / 16,
                 p.width / 3, p.height / 2 - p.height / 4 - p.height / 8,
-                215,true);
+                215, true);
 
         registerbox = new TextBox(
                 "Please enter your name: ",
-                 p.width / 3, p.height / 4 + p.height / 16,
+                p.width / 3, p.height / 4 + p.height / 16,
                 p.width / 3, p.height / 2 - p.height / 4 - p.height / 8,
-                215,false);
+                215, false);
     }
 
     class TextBox {
@@ -63,8 +64,9 @@ public class Login {
         boolean isFocused;
         String txt = "";
         String title;
-        boolean hide ;
-        TextBox(String tt, int xx, int yy, int ww, int hh, int li,boolean hid) {
+        boolean hide;
+
+        TextBox(String tt, int xx, int yy, int ww, int hh, int li, boolean hid) {
 
             title = tt;
 
@@ -94,9 +96,9 @@ public class Login {
             p.fill(200);
             p.rect(x, y, w, h);
             p.fill(0);
-            if(hide){
-                p.text("*".repeat(txt.length())+ blinkChar(), x, y, w, h);
-            }else p.text(txt + blinkChar(), x, y, w, h);
+            if (hide) {
+                p.text("*".repeat(txt.length()) + blinkChar(), x, y, w, h);
+            } else p.text(txt + blinkChar(), x, y, w, h);
 
         }
 
@@ -115,20 +117,21 @@ public class Login {
             if (k == p.BACKSPACE) txt = txt.substring(0, p.max(0, len - 1));
             else if (len >= lim) return;
             else if (k == p.ENTER || k == p.RETURN) {
-                if(state == stateLoginBox) {
+                if (state == stateLoginBox) {
                     state = stateLoginPasswordBox;
                     resultLogin = txt;
-                }
-                else if (state == stateRegisterBox) {
+                } else if (state == stateRegisterBox) {
                     state = stateRegisterPasswordBox;
                     resultRegister = txt;
-                }else if (state == stateLoginPasswordBox) {
+                    txt = "";
+                } else if (state == stateLoginPasswordBox) {
                     state = stateWaitLogin;
                     resultLPassword = txt;
-                    l.write("Login "+"U: "+resultLogin + " P: "+resultLPassword+" ");
+                    txt = "";
+                    l.write("Login " + "U: " + resultLogin + " P: " + resultLPassword + " ");
                     String res = l.read();
                     boolean b = Boolean.parseBoolean(res);
-                    if(b){
+                    if (b) {
                         String r;
                         r = l.read();
                         String[] strings = r.split(" ");
@@ -137,25 +140,23 @@ public class Login {
                         obstacles.add(new Obstacle(Float.parseFloat(strings[6]), Float.parseFloat(strings[7]), Float.parseFloat(strings[8])));
                         obstacles.add(new Obstacle(Float.parseFloat(strings[9]), Float.parseFloat(strings[10]), Float.parseFloat(strings[11])));
                         state = stateGame;
-                    }else{
-                        resultLogin = "";
-                        resultLPassword = "";
-                        state = stateNormal;
                     }
-                }else if (state == stateRegisterPasswordBox) {
+                } else if (state == stateRegisterPasswordBox) {
                     state = stateWaitRegister;
                     resultRPassword = txt;
-                    l.write("Register "+"U: "+resultRegister+ " P: "+resultRPassword+" ");
+                    l.write("Register " + "U: " + resultRegister + " P: " + resultRPassword + " ");
                     String res = l.read();
                     boolean b = Boolean.parseBoolean(res);
                     state = stateNormal;
-                    if(b){
+                    txt = "";
+                    if (b) {
                         System.out.println("Success");
-                    }else{
+                    } else {
                         System.out.println("Fail");
-                        resultRegister = "";
-                        resultRPassword = "";
                     }
+                } else {
+                    txt = "";
+                    state = stateNormal;
                 }
             } else if (k == p.TAB & len < lim - 3) txt += "    ";
             else if (k == p.DELETE) txt = "";
@@ -181,12 +182,9 @@ public class Login {
 
         String blinkChar() {
             int x = p.frameCount % 60;
-            return  (x <= 40)?  "_" : "";
+            return (x <= 40) ? "_" : "";
         }
     }
-
-
-
 
 
 }
