@@ -5,10 +5,9 @@
 start()->
     Port = 5026,
     {ok, LSock} = gen_tcp:listen(Port, [binary, {packet, line}, {reuseaddr, true}]),
-    Test = maps:new(),
-
-    Pid = spawn(fun()-> loop(maps:new(),maps:new(),createObsList(4),maps:put(1,[50.0,50.0,100.0,100.0,off,0.0,0.0,off,10.0,0.0,0.0,10],Test),{false,false,false},queue:new()) end),
+    Pid = spawn(fun()-> loop(maps:new(),maps:new(),createObsList(4),maps:new(),{false,false,false},{false,false,false},queue:new()) end),
     spawn(fun()-> delta(16) end),
+    spawn(fun()-> spawnCreature(8000) end),
     register(?MODULE,Pid),
     Log = spawn(fun()-> loopManager(maps:new()) end),
     register(loginManager,Log),
@@ -113,16 +112,15 @@ end.
 
 
 
-
 % ----------------------------------------------------- GAME LOOP ---------------------------------------------------- %
 
-loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)-> 
+loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue)-> 
     receive %high priority
         {run,Delta}->
             {NewMapPlayers,NewMapCreatures}= simulate(MapPlayers,ObsList,MapCreatures,Delta),
             sendState(NewMapPlayers,NewMapCreatures),
             %io:format("~p~n",[maps:to_list(NewMap)]),
-            loop(Pids,NewMapPlayers,ObsList,MapCreatures,PlayerIds,Queue)
+            loop(Pids,NewMapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue)
         after 0 ->
             receive
             {run,Delta} -> 
@@ -130,8 +128,23 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)->
                 {NewMapPlayers,NewMapCreatures}= simulate(MapPlayers,ObsList,MapCreatures,Delta),
                 sendState(NewMapPlayers,NewMapCreatures),
                 
-                loop(Pids,NewMapPlayers,ObsList,NewMapCreatures,PlayerIds,Queue);   
+                loop(Pids,NewMapPlayers,ObsList,NewMapCreatures,PlayerIds,CreatureIds,Queue);   
             
+
+            {spawnCreature} ->
+                    print("Trying to spawn creature"),
+                    Size = maps:size(MapCreatures),
+                        if
+                            Size < 3->
+                                {N,NewCreatureIds} = getId(CreatureIds), 
+                                NeMapCreatures = maps:put(N,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0,on,on,on}, N],MapCreatures),
+                                NewMapCreatures = maps:put(N,initial(1,MapPlayers,NeMapCreatures,ObsList,N),NeMapCreatures);
+                            true -> 
+                                NewMapCreatures = MapCreatures,
+                                NewCreatureIds = CreatureIds       
+                        end,
+                        loop(Pids,MapPlayers,ObsList,NewMapCreatures,PlayerIds,NewCreatureIds,Queue);
+
             {enter, Pid,Username} ->
                         print("User enter"),
                         Size = maps:size(Pids),
@@ -139,7 +152,7 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)->
                             Size < 3->
                                 NewPids = maps:put(Pid,{Username,0},Pids),
                                 {N,NewPlayerIds} = getId(PlayerIds), 
-                                NeMapPlayers = maps:put(Pid,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0}, 0],MapPlayers),
+                                NeMapPlayers = maps:put(Pid,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0,on,on,on}, 0],MapPlayers),
                                 NewMapPlayers = maps:put(Pid,initial(Pid,NeMapPlayers,MapCreatures,ObsList,N),NeMapPlayers),
                                 NewQueue = Queue;
                             true -> 
@@ -150,7 +163,7 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)->
                         end,
                         sendObs(Pid,ObsList),
                         
-                        loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,NewQueue);
+                        loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,CreatureIds,NewQueue);
             {line, Data, From} ->
                         Values = maps:get(From,MapPlayers), %[X,Y,VX,VY,AX,AY,A,W,Alpha,R]
                         %parse 
@@ -160,13 +173,13 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)->
                         %update
                         NewValues = accel(Values,Move),
                         NewMapPlayers =maps:update(From,NewValues,MapPlayers),
-                        loop(Pids,NewMapPlayers,ObsList,MapCreatures,PlayerIds,Queue);
+                        loop(Pids,NewMapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue);
             {leave, Pid} ->
                 {Username,_} = maps:get(Pid,Pids),
                 loginManager ! {leave,Username},
                 print("User left"),
                         RemovedPid = maps:remove(Pid,Pids),
-                        [_,_,_,_,_,_,_,_,_,_,_,_,I]= maps:get(Pid,MapPlayers),
+                        [_,_,_,_,_,_,_,_,_,_,_,I]= maps:get(Pid,MapPlayers),
                         RemovedPlayer = maps:remove(Pid,MapPlayers),
                         {X,Y,Z} = PlayerIds,
                         RPlayerIds =if
@@ -179,7 +192,7 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)->
                                 {value,{NewPid,Username},NewQueue} = queue:out(Queue),
                                 NewPids = maps:put(NewPid,{Username,0},RemovedPid),
                                 {N,NewPlayerIds} = getId(RPlayerIds),
-                                NeMapPlayers = maps:put(NewPid,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0}, 0],RemovedPlayer),
+                                NeMapPlayers = maps:put(NewPid,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0,on,on,on}, 0],RemovedPlayer),
                                 NewMapPlayers = maps:put(NewPid,initial(Pid,MapPlayers,MapCreatures,ObsList,N),NeMapPlayers);
                             true ->
                                 NewPlayerIds = RPlayerIds,
@@ -188,7 +201,7 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,Queue)->
                                 NewMapPlayers = RemovedPlayer
                         end,
                                                 
-                        loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,NewQueue);
+                        loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,CreatureIds,NewQueue);
             {stop} -> ok
             end
 end.
@@ -325,11 +338,10 @@ collision_PlayerCreatures(Player,MapPlayers,Creature,MapCreatures,ObsList)->
     Res = 
         if
         SumR>=Dist -> 
-            {[X1,Y1,VX,VY,AccelL,A,W,AccelR,R1+Type,Agility1,Batteries1,I],generate_safespot(Creature,MapPlayers,MapCreatures,ObsList)};
-        SumR<Dist -> {[X1,Y1,VX,VY,AccelL,A,W,AccelR,R1,Agility1,Batteries1,I],[X2,Y2,VX2,VY2,AccelL2,A2,W2,AccelR2,R2,Agility2,Batteries2,Type]}
+            {maps:update(Player,[X1,Y1,VX,VY,AccelL,A,W,AccelR,R1+Type,Agility1,Batteries1,I],MapPlayers),maps:remove(Creature,MapCreatures)};
+        SumR<Dist -> {MapPlayers,MapCreatures}
     end,
-    {Res1,Res2} = Res,
-    {maps:update(Player,Res1,MapPlayers),maps:update(Creature,Res2,MapCreatures)}.
+    Res.
 
 
 check_collisionSpawn(X0,Y0,X1,Y1)-> 
@@ -401,34 +413,70 @@ evolve(Data,Delta)->
     NewX = X+Vx*Dt,
     NewY = Y+Vy*Dt,
     VMax = 200.0,
-    {LBattery,RBattery,MBattery}= Batteries,
+    {LBattery,RBattery,MBattery,LState,RState,MState}= Batteries,
     NewMBattery =
         if
-        (AccelL == on) and (MBattery >= 15) -> Ax = Agility*math:cos(A),
-                                            Ay = Agility*math:sin(A),
-                                            MBattery - 1;
-        true -> Ax = 0.0,Ay = 0.0,
-        MBattery
+        (AccelL == on) and (MState == on) -> 
+            Ax = Agility*math:cos(A),
+            Ay = Agility*math:sin(A),
+            MBattery - 1;
+        true ->
+            Ax = 0.0,Ay = 0.0,
+            NewMBattery1 = if 
+                MBattery+10*Dt =< 100.0 -> 
+                     MBattery+10*Dt;
+                true ->  
+                    100.0
+            end,
+            NewMBattery1
     end,
 
     {NewLBattery,NewRBattery} = 
         if
-        (AccelR == left) and (LBattery >= 15) -> Alpha = -300,
-                                            {LBattery-1,RBattery};
+        (AccelR == left) and (LState == on) -> 
+            Alpha = -300,
+            {LBattery-1,RBattery};
 
-        (AccelR == left) and (LBattery < 15) -> Alpha = 0,
-                                            {LBattery,RBattery};
-        
-        
-        
-        (AccelR == right) and (RBattery >= 15) -> Alpha = 300,
-                                            {LBattery,RBattery-1};
+        (AccelR == left) and (LState == off) -> 
+            Alpha = 0,
+            NewLBattery1 = 
+                if 
+                LBattery+10*Dt =< 100.0 -> 
+                    LBattery+10*Dt;
+                true -> 
+                     100.0
+            end,
+            {NewLBattery1,RBattery};
+              
+        (AccelR == right) and (RState == on) -> 
+            Alpha = 300,
+            {LBattery,RBattery-1};
 
-        (AccelR == right) and (RBattery < 15) -> Alpha = 0,
-                                            {LBattery,RBattery};
+        (AccelR == right) and (RState == off) -> Alpha = 0,
+        NewRBattery1 = if 
+                RBattery+10*Dt =< 100.0 -> 
+                     RBattery+10*Dt;
+                true ->  
+                    100.0
+            end,
+            {LBattery,NewRBattery1};
         
         true -> Alpha = 0,
-                        {LBattery,RBattery}
+            NewLBattery1 = 
+                if 
+                LBattery+10*Dt =< 100.0 -> 
+                    LBattery+10*Dt;
+                true -> 
+                     100.0
+            end,
+
+            NewRBattery1 = if 
+                RBattery+10*Dt =< 100.0 -> 
+                     RBattery+10*Dt;
+                true ->  
+                    100.0
+            end,
+            {NewLBattery1,NewRBattery1}
     end,
 
 
@@ -462,21 +510,25 @@ evolve(Data,Delta)->
     end,
 
     
-    NewNewLBattery = if 
-        NewLBattery+10*Dt =< 100.0 ->  NewLBattery+10*Dt;
-        true ->  100.0
+    NewRBatteryState = if 
+        (NewRBattery > 15) and (RState == off) ->  on;
+        NewRBattery =< 1 -> off;
+        true ->  RState
     end,
 
-    NewNewRBattery = if 
-        NewRBattery+10*Dt =< 100.0 ->  NewRBattery+10*Dt;
-        true ->  100.0
+   NewLBatteryState = if 
+        (NewLBattery > 15) and (LState == off) ->  on;
+        NewLBattery =< 1 -> off;
+        true ->  LState
     end,
 
-    NewNewMBattery = if 
-        NewMBattery+10*Dt =< 100.0 ->  NewMBattery+10*Dt;
-        true ->  100.0
+    NewMBatteryState = if 
+        (NewMBattery > 15) and (MState == off) ->  on;
+        NewMBattery =< 1 -> off;
+        true ->  MState
     end,
-    NewBatteries = {NewNewLBattery,NewNewRBattery,NewNewMBattery},
+
+    NewBatteries = {NewLBattery,NewRBattery,NewMBattery,NewLBatteryState,NewRBatteryState,NewMBatteryState},
     [NewX,NewY,NewVx,NewVy,AccelL,NewA,NewW,AccelR,NewR,NewAgility,NewBatteries,I].
 
 
@@ -531,12 +583,23 @@ sendObs(Pid,ObsList)->
     ok.
 
 
+% -------------------------------------------------- GAME TIME LOOP -------------------------------------------------- %
+
 delta(Delta)->
     receive
         after Delta ->
             ?MODULE ! {run,Delta},
             delta(Delta)
     end.
+
+spawnCreature(Delta) ->
+    receive
+        after Delta ->
+            ?MODULE ! {spawnCreature},
+            spawnCreature(Delta)
+    end.
+
+
 
 stop()->
     ?MODULE ! {stop}.
