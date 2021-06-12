@@ -232,8 +232,7 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore)
                                 {N,NewPlayerIds} = getId(RPlayerIds),
                                 NeMapPlayers = maps:put(NewPid,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0,on,on,on}, 0],ReMapPlayers),
                                 NewMapPlayers = maps:put(NewPid,initial(Pid,MapPlayers,MapCreatures,ObsList,N),NeMapPlayers),
-                                sendObs(NewPid,N,ObsList);
-                                
+                                sendObs(NewPid,N,ObsList);            
                             true ->
                                 NewPlayerIds = RPlayerIds,
                                 NewQueue = Queue,
