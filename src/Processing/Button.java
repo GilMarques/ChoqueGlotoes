@@ -3,10 +3,11 @@ package Processing;
 import processing.core.PApplet;
 
 public class Button {
+    public boolean hovered = false;
     PApplet p = MainProcessing.processing;
     int x, y, w, h;
     String s;
-    public boolean hovered = false;
+
     Button(int x, int y, int w, int h, String t) {
         this.x = x;
         this.y = y;

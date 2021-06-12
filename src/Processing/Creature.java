@@ -3,25 +3,31 @@ package Processing;
 import processing.core.PVector;
 import processing.core.*;
 
-public class Player {
+public class Creature {
     public PVector pos = new PVector();
     PApplet p = MainProcessing.processing;
-    float red = p.random(0, 255);
-    float green = p.random(0, 255);
-    float blue = p.random(0, 255);
+    float red;
+    float green;
     private float radius = 20.0f;
     private float angle = 0f;
 
-    Player() {
+    Creature() {
         pos.x = -99;
         pos.y = -99;
     }
 
-    public void update(float x, float y, float a, float r) {
+    public void update(float x, float y, float a, float r, boolean isRed) {
         pos.x = x;
         pos.y = y;
         angle = a;
         radius = r;
+        if (isRed) {
+            red = 255f;
+            green = 0f;
+        } else {
+            red = 0f;
+            green = 255f;
+        }
     }
 
     public void draw() {
@@ -29,7 +35,7 @@ public class Player {
         p.pushMatrix();
         p.rotate(angle);
         p.popMatrix();
-        p.fill(red, green, blue, 50f);
+        p.fill(red, green, 0f, 50f);
         p.circle(pos.x, pos.y, radius * 2);
     }
 }

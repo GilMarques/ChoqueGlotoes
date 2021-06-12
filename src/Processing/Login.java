@@ -13,8 +13,11 @@ public class Login {
     final int stateRegisterPasswordBox = 4;
     final int stateWaitLogin = 5;
     final int stateWaitRegister = 6;
-    final int stateGame = 7;
+    final int stateQueue = 7;
+    final int stateGame = 8;
+    final int stateDead = 9;
     private final ArrayList<Obstacle> obstacles;
+    int MyID;
     PApplet p = MainProcessing.processing;
     TextBox loginbox;
     TextBox loginpassbox;
@@ -114,7 +117,7 @@ public class Login {
 
             final int len = txt.length();
 
-            if (k == p.BACKSPACE) txt = txt.substring(0, p.max(0, len - 1));
+            if (k == p.BACKSPACE) txt = txt.substring(0, PApplet.max(0, len - 1));
             else if (len >= lim) return;
             else if (k == p.ENTER || k == p.RETURN) {
                 if (state == stateLoginBox) {
@@ -135,10 +138,11 @@ public class Login {
                         String r;
                         r = l.read();
                         String[] strings = r.split(" ");
-                        obstacles.add(new Obstacle(Float.parseFloat(strings[0]), Float.parseFloat(strings[1]), Float.parseFloat(strings[2])));
-                        obstacles.add(new Obstacle(Float.parseFloat(strings[3]), Float.parseFloat(strings[4]), Float.parseFloat(strings[5])));
-                        obstacles.add(new Obstacle(Float.parseFloat(strings[6]), Float.parseFloat(strings[7]), Float.parseFloat(strings[8])));
-                        obstacles.add(new Obstacle(Float.parseFloat(strings[9]), Float.parseFloat(strings[10]), Float.parseFloat(strings[11])));
+                        MyID = Integer.parseInt(strings[0]);
+                        obstacles.add(new Obstacle(Float.parseFloat(strings[1]), Float.parseFloat(strings[2]), Float.parseFloat(strings[3])));
+                        obstacles.add(new Obstacle(Float.parseFloat(strings[4]), Float.parseFloat(strings[5]), Float.parseFloat(strings[6])));
+                        obstacles.add(new Obstacle(Float.parseFloat(strings[7]), Float.parseFloat(strings[8]), Float.parseFloat(strings[9])));
+                        obstacles.add(new Obstacle(Float.parseFloat(strings[10]), Float.parseFloat(strings[11]), Float.parseFloat(strings[12])));
                         state = stateGame;
                     }
                 } else if (state == stateRegisterPasswordBox) {
@@ -160,9 +164,8 @@ public class Login {
                 }
             } else if (k == p.TAB & len < lim - 3) txt += "    ";
             else if (k == p.DELETE) txt = "";
-            else if (k >= ' ') txt += p.str(k);
+            else if (k >= ' ') txt += PApplet.str(k);
         }
-
 
         void tKeyPressed() {
             if (p.key == p.ESC) {
@@ -176,7 +179,7 @@ public class Login {
 
             final int len = txt.length();
 
-            if (k == p.LEFT) txt = txt.substring(0, p.max(0, len - 1));
+            if (k == p.LEFT) txt = txt.substring(0, PApplet.max(0, len - 1));
             else if (k == p.RIGHT & len < lim - 3) txt += "    ";
         }
 
@@ -185,6 +188,5 @@ public class Login {
             return (x <= 40) ? "_" : "";
         }
     }
-
 
 }

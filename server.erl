@@ -3,16 +3,16 @@
 
 
 start()->
-    Port = 5026,
+    Port = 5027,
     {ok, LSock} = gen_tcp:listen(Port, [binary, {packet, line}, {reuseaddr, true}]),
-    Pid = spawn(fun()-> loop(maps:new(),maps:new(),createObsList(4),maps:new(),{false,false,false},{false,false,false},queue:new()) end),
+    Pid = spawn(fun()-> loop(maps:new(),maps:new(),createObsList(4),maps:new(),{false,false,false},{false,false,false},queue:new(),{"Player",0}) end),
     spawn(fun()-> delta(16) end),
     spawn(fun()-> spawnCreature(8000) end),
     register(?MODULE,Pid),
     Log = spawn(fun()-> loopManager(maps:new()) end),
     register(loginManager,Log),
     spawn(fun() -> acceptor(LSock) end),
-    registered().
+    ok.
 
 acceptor(LSock) ->
     {ok, Sock} = gen_tcp:accept(LSock),
@@ -114,36 +114,29 @@ end.
 
 % ----------------------------------------------------- GAME LOOP ---------------------------------------------------- %
 
-loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue)-> 
-    receive %high priority
-        {run,Delta}->
-            {NewMapPlayers,NewMapCreatures}= simulate(MapPlayers,ObsList,MapCreatures,Delta),
-            sendState(NewMapPlayers,NewMapCreatures),
-            %io:format("~p~n",[maps:to_list(NewMap)]),
-            loop(Pids,NewMapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue)
-        after 0 ->
-            receive
+loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore)-> 
+    receive
             {run,Delta} -> 
                 %io:format("~p~n",[maps:to_list(MapPlayers)]),
                 {NewMapPlayers,NewMapCreatures}= simulate(MapPlayers,ObsList,MapCreatures,Delta),
-                sendState(NewMapPlayers,NewMapCreatures),
+                sendState(NewMapPlayers,NewMapCreatures,Pids,HighScore),
                 
-                loop(Pids,NewMapPlayers,ObsList,NewMapCreatures,PlayerIds,CreatureIds,Queue);   
+                loop(Pids,NewMapPlayers,ObsList,NewMapCreatures,PlayerIds,CreatureIds,Queue,HighScore);   
             
 
             {spawnCreature} ->
-                    print("Trying to spawn creature"),
+                    %print("Trying to spawn creature"),
                     Size = maps:size(MapCreatures),
                         if
                             Size < 3->
                                 {N,NewCreatureIds} = getId(CreatureIds), 
-                                NeMapCreatures = maps:put(N,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0,on,on,on}, N],MapCreatures),
-                                NewMapCreatures = maps:put(N,initial(1,MapPlayers,NeMapCreatures,ObsList,N),NeMapCreatures);
+                                NeMapCreatures = maps:put(N,[50.0,50.0,400.0,400.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0,on,on,on}, {N,false}],MapCreatures),
+                                NewMapCreatures = maps:put(N,initial(1,MapPlayers,NeMapCreatures,ObsList,{N,false}),NeMapCreatures);
                             true -> 
                                 NewMapCreatures = MapCreatures,
                                 NewCreatureIds = CreatureIds       
                         end,
-                        loop(Pids,MapPlayers,ObsList,NewMapCreatures,PlayerIds,NewCreatureIds,Queue);
+                        loop(Pids,MapPlayers,ObsList,NewMapCreatures,PlayerIds,NewCreatureIds,Queue,HighScore);
 
             {enter, Pid,Username} ->
                         print("User enter"),
@@ -154,16 +147,17 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue)->
                                 {N,NewPlayerIds} = getId(PlayerIds), 
                                 NeMapPlayers = maps:put(Pid,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0,on,on,on}, 0],MapPlayers),
                                 NewMapPlayers = maps:put(Pid,initial(Pid,NeMapPlayers,MapCreatures,ObsList,N),NeMapPlayers),
-                                NewQueue = Queue;
+                                NewQueue = Queue,
+                                sendObs(Pid,N,ObsList);
                             true -> 
                                 NewPlayerIds = PlayerIds,
                                 NewPids = Pids,
                                 NewMapPlayers = MapPlayers,
                                 NewQueue = queue:in({Pid,Username},Queue)                            
                         end,
-                        sendObs(Pid,ObsList),
                         
-                        loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,CreatureIds,NewQueue);
+                        
+                        loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,CreatureIds,NewQueue,HighScore);
             {line, Data, From} ->
                         Values = maps:get(From,MapPlayers), %[X,Y,VX,VY,AX,AY,A,W,Alpha,R]
                         %parse 
@@ -173,14 +167,12 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue)->
                         %update
                         NewValues = accel(Values,Move),
                         NewMapPlayers =maps:update(From,NewValues,MapPlayers),
-                        loop(Pids,NewMapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue);
-            {leave, Pid} ->
+                        loop(Pids,NewMapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore);
+            {leave, Pid,I} ->
                 {Username,_} = maps:get(Pid,Pids),
                 loginManager ! {leave,Username},
                 print("User left"),
                         RemovedPid = maps:remove(Pid,Pids),
-                        [_,_,_,_,_,_,_,_,_,_,_,I]= maps:get(Pid,MapPlayers),
-                        RemovedPlayer = maps:remove(Pid,MapPlayers),
                         {X,Y,Z} = PlayerIds,
                         RPlayerIds =if
                             I==1 -> {false,Y,Z};
@@ -192,18 +184,43 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue)->
                                 {value,{NewPid,Username},NewQueue} = queue:out(Queue),
                                 NewPids = maps:put(NewPid,{Username,0},RemovedPid),
                                 {N,NewPlayerIds} = getId(RPlayerIds),
-                                NeMapPlayers = maps:put(NewPid,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0,on,on,on}, 0],RemovedPlayer),
+                                NeMapPlayers = maps:put(NewPid,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0,on,on,on}, 0],MapPlayers),
                                 NewMapPlayers = maps:put(NewPid,initial(Pid,MapPlayers,MapCreatures,ObsList,N),NeMapPlayers);
                             true ->
                                 NewPlayerIds = RPlayerIds,
                                 NewQueue = Queue,
                                 NewPids = RemovedPid,
-                                NewMapPlayers = RemovedPlayer
-                        end,
-                                                
-                        loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,CreatureIds,NewQueue);
+                                NewMapPlayers = MapPlayers
+                        end,                        
+                        loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,CreatureIds,NewQueue,HighScore);
+            {killCreature,Cid} ->
+                NewMapCreatures = maps:remove(Cid,MapCreatures),
+                {X,Y,Z} = CreatureIds,
+                NewCreatureIds =if
+                            Cid==1 -> {false,Y,Z};
+                            Cid==2 -> {X,false,Z};
+                            Cid==3 -> {X,Y,false}
+                end,
+                loop(Pids,MapPlayers,ObsList,NewMapCreatures,PlayerIds,NewCreatureIds,Queue,HighScore);
+
+            {resetScore,Pid}->
+                {Username,_} = maps:get(Pid,Pids),
+                NewPids = maps:update(Pid,{Username,0},Pids),
+                loop(NewPids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore);
+
+            {addScore,Pid}->
+                {_,HS} = HighScore,
+                {Username,Score} = maps:get(Pid,Pids),
+                NewPids = maps:update(Pid,{Username,Score+1},Pids),
+                NewHighScore = 
+                    if
+                    Score+1 > HS -> {Username,Score+1};
+                    true -> HighScore
+                    end,
+                loop(NewPids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,NewHighScore);
+
             {stop} -> ok
-            end
+            
 end.
 
 initial(Key,MapPlayers,MapCreatures,ObsList,N)->
@@ -241,7 +258,7 @@ simulate(MapPlayers,ObsList,MapCreatures,Delta)->
     MapPlayers3 = maps:fold(fun(Key,_,AccIn2) -> lists:foldl(fun(Elem,AccIn1)-> collisionObs(Key,Elem,AccIn1) end, AccIn2,ObsList) end,MapPlayers2,MapPlayers2),
     
     %colide jogadores/criaturas
-    {MapPlayers4,MapCreatures1} = maps:fold(fun(Player,_,{PAccIn2,CAccIn2}) -> maps:fold(fun(Creature,_,{PAccIn,CAccIn}) -> collision_PlayerCreatures(Player,PAccIn,Creature,CAccIn,ObsList) end ,{PAccIn2,CAccIn2},MapCreatures) end,{MapPlayers3,MapCreatures},MapPlayers3),
+    {MapPlayers4,MapCreatures1} = maps:fold(fun(Player,_,{PAccIn2,CAccIn2}) -> maps:fold(fun(Creature,_,{PAccIn,CAccIn}) -> collision_PlayerCreatures(Player,PAccIn,Creature,CAccIn) end ,{PAccIn2,CAccIn2},MapCreatures) end,{MapPlayers3,MapCreatures},MapPlayers3),
     %colide criaturas/paredes
     MapCreatures2 = maps:fold(fun(Key,_,AccIn) -> collisionWalls(Key,AccIn) end,MapCreatures1,MapCreatures1),
     
@@ -290,47 +307,56 @@ collisionWalls(Key,Map)->
 maps:update(Key,Res,Map).
 
 collidePlayers(Key1,Key2,MapPlayers,MapCreatures,ObsList)->
-    io:format("~p~n",[MapPlayers]),
-    if 
-        not(Key1 == Key2)->
-            [X1,Y1,_,_,_,_,_,_,R1,_,_,_] = maps:get(Key1,MapPlayers),
-            [X2,Y2,_,_,_,_,_,_,R2,_,_,_] = maps:get(Key2,MapPlayers),
-            Xdist = X2-X1,
-            Ydist = Y2-Y1,
-            Dist = math:sqrt((Xdist*Xdist) + (Ydist*Ydist)),
-            SumR = R1+R2,
-            
-            if
-                SumR>=Dist -> 
+    case  {maps:find(Key1,MapPlayers), maps:find(Key2,MapPlayers)} of 
+        {{ok,_},{ok,_}}->
+            if 
+                not(Key1 == Key2)->
+                    [X1,Y1,_,_,_,_,_,_,R1,_,_,I1] = maps:get(Key1,MapPlayers),
+                    [X2,Y2,_,_,_,_,_,_,R2,_,_,I2] = maps:get(Key2,MapPlayers),
+                    Xdist = X2-X1,
+                    Ydist = Y2-Y1,
+                    Dist = math:sqrt((Xdist*Xdist) + (Ydist*Ydist)),
+                    SumR = R1+R2,
+                    
                     if
-                        R1>R2 -> 
+                        SumR>=Dist -> 
                             if
-                                R2 =< 10.0 ->
-                                    Key2 ! {leave},
-                                    ok;
-                                true->
-                                    ok
-                            end,
-                            maps:update(Key2,generate_safespot(Key2,MapPlayers,MapCreatures,ObsList),MapPlayers);
-                        true ->
-                            if
-                                R1 =< 10.0 ->
-                                    Key1 ! {leave};
-                                true->
-                                    ok
-                            end,  
-                            maps:update(Key1,generate_safespot(Key1,MapPlayers,MapCreatures,ObsList),MapPlayers)
+                                R1>R2 -> 
+                                    ?MODULE ! {addScore,Key1},
+                                    if
+                                        R2 =< 10.0 ->
+                                            Key2 ! {leave},
+                                            ?MODULE ! {leave,Key2,I2},
+                                            maps:remove(Key2,MapPlayers);
+                                        true->
+                                            ?MODULE ! {resetScore,Key2},
+                                            maps:update(Key2,generate_safespot(Key2,MapPlayers,MapCreatures,ObsList),MapPlayers)
+                                    end;
+                                    
+                                true ->
+                                    ?MODULE ! {addScore,Key2},
+                                    if
+                                        R1 =< 10.0 ->
+                                            Key1 ! {leave},
+                                            ?MODULE ! {leave,Key1,I1},
+                                            maps:remove(Key1,MapPlayers);
+                                        true->
+                                            ?MODULE ! {resetScore,Key1},
+                                            maps:update(Key1,generate_safespot(Key1,MapPlayers,MapCreatures,ObsList),MapPlayers)
+                                    end
+                            end;
+                        SumR<Dist -> MapPlayers
                     end;
-                SumR<Dist -> MapPlayers
+                true -> MapPlayers
             end;
-        true -> MapPlayers
+        _ -> MapPlayers
     end.
     
 
 
-collision_PlayerCreatures(Player,MapPlayers,Creature,MapCreatures,ObsList)->
+collision_PlayerCreatures(Player,MapPlayers,Creature,MapCreatures)->
     [X1,Y1,VX,VY,AccelL,A,W,AccelR,R1,Agility1,Batteries1,I] = maps:get(Player,MapPlayers),
-    [X2,Y2,VX2,VY2,AccelL2,A2,W2,AccelR2,R2,Agility2,Batteries2,Type] = maps:get(Creature,MapCreatures), %[X,Y,VX,VY,R],
+    [X2,Y2,_,_,_,_,_,_,R2,_,_,Type] = maps:get(Creature,MapCreatures),
     SumR = R1+R2,
     XDist = X2-X1,
     YDist = Y2-Y1,
@@ -338,7 +364,23 @@ collision_PlayerCreatures(Player,MapPlayers,Creature,MapCreatures,ObsList)->
     Res = 
         if
         SumR>=Dist -> 
-            {maps:update(Player,[X1,Y1,VX,VY,AccelL,A,W,AccelR,R1+Type,Agility1,Batteries1,I],MapPlayers),maps:remove(Creature,MapCreatures)};
+            if
+                Type == true ->
+                    if
+                        R1 =< 10.0 -> ?MODULE ! {leave,Player}, {MapPlayers,maps:remove(Creature,MapCreatures)};
+                        true ->
+                            ?MODULE ! {killCreature,Creature},
+                             {maps:update(Player,[X1,Y1,VX,VY,AccelL,A,W,AccelR,R1-1,Agility1,Batteries1,I],MapPlayers),MapCreatures}
+                    end;
+                true ->
+                    %calcular ganhos
+                    GainR = 20,
+                    GainAgility = 500,
+
+                    ?MODULE ! {killCreature,Creature},
+                    {maps:update(Player,[X1,Y1,VX,VY,AccelL,A,W,AccelR,R1+GainR,Agility1+GainAgility,Batteries1,I],MapPlayers),MapCreatures}
+            end;
+            
         SumR<Dist -> {MapPlayers,MapCreatures}
     end,
     Res.
@@ -419,7 +461,7 @@ evolve(Data,Delta)->
         (AccelL == on) and (MState == on) -> 
             Ax = Agility*math:cos(A),
             Ay = Agility*math:sin(A),
-            MBattery - 1;
+            MBattery - 0.1;
         true ->
             Ax = 0.0,Ay = 0.0,
             NewMBattery1 = if 
@@ -563,22 +605,34 @@ accel([X,Y,VX,VY,_,A,W,_,R,Agility,Batteries,I],Move)->
 [X,Y,VX,VY,AccelL,A,W,AccelR,R,Agility,Batteries,I].
     
 
-sendState(MapPlayers,MapCreatures)->
-    List = maps:fold(fun(_,[X,Y,_,_,_,A,_,_,R,_,_,I],AccIn) -> [integer_to_list(I), io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[A]),io_lib:format("~.3f",[R]) | AccIn] end,[],MapPlayers),
-    Pids = maps:keys(MapPlayers),
+sendState(MapPlayers,MapCreatures,Pids,HighScore)->
+    List = maps:fold(fun(_,[X,Y,_,_,_,A,_,_,R,_,{LB,RB,B,_,_,_},I],AccIn) -> [integer_to_list(I), io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[A]),io_lib:format("~.3f",[R]),io_lib:format("~.3f",[LB]),io_lib:format("~.3f",[RB]),io_lib:format("~.3f",[B])    | AccIn] end,[],MapPlayers),
+    Sends = maps:keys(MapPlayers),
     String1 = string:join(List," "),
 
-    List2 = maps:fold(fun(_,[X,Y,_,_,_,A,_,_,R,_,_,_],AccIn) -> [io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[A]),io_lib:format("~.3f",[R]) | AccIn] end,[],MapCreatures),
+    List2 = maps:fold(fun(_,[X,Y,_,_,_,A,_,_,R,_,_,{I,Type}],AccIn) -> [integer_to_list(I),io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[A]),io_lib:format("~.3f",[R]),atom_to_list(Type) | AccIn] end,[],MapCreatures),
     String2 =  string:join(List2," "),
-    Out = String1 ++ " Creatures " ++ String2,
+
+    List3 = maps:fold(fun(_,{Username,Score},AccIn) -> [Username,integer_to_list(Score) | AccIn] end,[],Pids),
+    String3 =  string:join(List3," "),
+
+    
+    {RecordHolder,HS} = HighScore,
+    List4 = [RecordHolder,integer_to_list(HS)],
+    String4 =  string:join(List4," "),
+
+    Out = String1 ++ "_Creatures " ++ String2 ++ "_Scores " ++ String3 ++ "_HighScore "  ++ String4,
     Out2 = string:concat(Out,"\r\n"),
-    [Pid ! {line, Out2} || Pid <- Pids],
+
+    %Send Score
+    
+    [Pid ! {line, Out2} || Pid <- Sends],
     ok.
 
-sendObs(Pid,ObsList)->
+sendObs(Pid,N,ObsList)->
     List = lists:foldl(fun({X,Y,S},AccIn) -> [io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[S]) | AccIn]  end,[],ObsList),
     Out = string:join(List," "),
-    Out2 = string:concat(Out,"\r\n"),
+    Out2 = integer_to_list(N) ++ " "++ string:concat(Out,"\r\n"),
     Pid ! {line, Out2},
     ok.
 

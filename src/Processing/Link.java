@@ -10,42 +10,45 @@ public class Link {
     private BufferedReader in;
     private PrintWriter pw;
 
-    /** Conecta-se ao servidor com o addr e a porta atraves de uma socket **/
+    /**
+     * Conecta-se ao servidor com o addr e a porta atraves de uma socket
+     **/
     public boolean connect(String addr, int port) {
-        try{
-            sock = new Socket(addr,port);
+        try {
+            sock = new Socket(addr, port);
             in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
             pw = new PrintWriter(sock.getOutputStream());
             sock.setTcpNoDelay(true);
             System.out.println("S");
             return true;
-        } catch(Exception e){
+        } catch (Exception e) {
             System.out.println("N");
-            return false;}
+            return false;
+        }
     }
 
-    public void write(String s){
+    public void write(String s) {
         //System.out.println("Write: "+s);
         pw.println(s);
         pw.flush();
     }
 
-    public String read(){
+    public String read() {
         String str;
-        try{
+        try {
             str = in.readLine();
-            //System.out.println("Read: "+str);
-        } catch(Exception e){
-            return null;}
+            System.out.println("Read: " + str);
+        } catch (Exception e) {
+            return null;
+        }
         return str;
     }
 
-
-    public void disconnect(){
-        try{
+    public void disconnect() {
+        try {
             sock.close();
-        }catch(Exception e){}
+        } catch (Exception e) {
+        }
     }
-
 
 }
