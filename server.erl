@@ -117,15 +117,14 @@ end.
 loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore)-> 
     receive
             {run,Delta} -> 
+                %print("Run"),
                 %io:format("~p~n",[maps:to_list(MapPlayers)]),
                 {NewMapPlayers,NewMapCreatures}= simulate(MapPlayers,ObsList,MapCreatures,Delta),
                 sendState(NewMapPlayers,NewMapCreatures,Pids,HighScore),
-                
                 loop(Pids,NewMapPlayers,ObsList,NewMapCreatures,PlayerIds,CreatureIds,Queue,HighScore);   
-            
 
             {spawnCreature} ->
-                    %print("Trying to spawn creature"),
+                    print("Spawning"),
                     Size = maps:size(MapCreatures),
                         if
                             Size < 3->
@@ -153,12 +152,14 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore)
                                 NewPlayerIds = PlayerIds,
                                 NewPids = Pids,
                                 NewMapPlayers = MapPlayers,
-                                NewQueue = queue:in({Pid,Username},Queue)                            
+                                NewQueue = queue:in({Pid,Username},Queue),    
+                                Pid ! {queued,queue:len(NewQueue)}                        
                         end,
-                        
-                        
+                        io:format("~p~n",[NewQueue]),
                         loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,CreatureIds,NewQueue,HighScore);
+
             {line, Data, From} ->
+                        %print("User Input"),
                         Values = maps:get(From,MapPlayers), %[X,Y,VX,VY,AX,AY,A,W,Alpha,R]
                         %parse 
                         H = string:split(Data,"n"),
@@ -166,12 +167,16 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore)
                         Move = string:split(L," ",all),
                         %update
                         NewValues = accel(Values,Move),
-                        NewMapPlayers =maps:update(From,NewValues,MapPlayers),
+                        NewMapPlayers = maps:update(From,NewValues,MapPlayers),
                         loop(Pids,NewMapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore);
+
             {leave, Pid,I} ->
-                {Username,_} = maps:get(Pid,Pids),
-                loginManager ! {leave,Username},
-                print("User left"),
+                print("Leaving"),
+                case maps:find(Pid,Pids) of
+                    {ok,_}->
+                        {Username,_} = maps:get(Pid,Pids),
+                        loginManager ! {leave,Username},
+                        print("User left"),
                         RemovedPid = maps:remove(Pid,Pids),
                         {X,Y,Z} = PlayerIds,
                         RPlayerIds =if
@@ -181,19 +186,75 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore)
                         end,
                         case queue:is_empty(Queue) of
                             false ->
-                                {value,{NewPid,Username},NewQueue} = queue:out(Queue),
-                                NewPids = maps:put(NewPid,{Username,0},RemovedPid),
+                                {{value,{NewPid,NewUsername}},NewQueue} = queue:out(Queue),
+                                NewPids = maps:put(NewPid,{NewUsername,0},RemovedPid),
                                 {N,NewPlayerIds} = getId(RPlayerIds),
                                 NeMapPlayers = maps:put(NewPid,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0,on,on,on}, 0],MapPlayers),
-                                NewMapPlayers = maps:put(NewPid,initial(Pid,MapPlayers,MapCreatures,ObsList,N),NeMapPlayers);
+                                NewMapPlayers = maps:put(NewPid,initial(Pid,MapPlayers,MapCreatures,ObsList,N),NeMapPlayers),
+                                sendObs(NewPid,N,ObsList);
                             true ->
                                 NewPlayerIds = RPlayerIds,
                                 NewQueue = Queue,
                                 NewPids = RemovedPid,
                                 NewMapPlayers = MapPlayers
-                        end,                        
-                        loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,CreatureIds,NewQueue,HighScore);
+                            end;                 
+                    error ->
+                        NewPids = Pids,
+                        NewMapPlayers = MapPlayers,
+                        NewPlayerIds = PlayerIds,
+                        Username = getUser(Pid,Queue),
+                        NewQueue = queue:filter(fun({P,_}) -> not(P==Username) end,Queue),
+                        loginManager ! {leave,Username}
+                end,
+                    loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,CreatureIds,NewQueue,HighScore);
+
+                {leave, Pid} ->
+                
+                case maps:find(Pid,Pids) of
+                    {ok,_}->
+                        {Username,_} = maps:get(Pid,Pids),
+                        loginManager ! {leave,Username},
+                        [_,_,_,_,_,_,_,_,_,_,_,I] = maps:get(Pid,MapPlayers),
+                        print("User left"),
+                        RemovedPid = maps:remove(Pid,Pids),
+                        ReMapPlayers = maps:remove(Pid,MapPlayers),
+                        {X,Y,Z} = PlayerIds,
+                        RPlayerIds =if
+                            I==1 -> {false,Y,Z};
+                            I==2 -> {X,false,Z};
+                            I==3 -> {X,Y,false}
+                        end,
+                        case queue:is_empty(Queue) of
+                            false ->
+                                io:format(" ~p ~n",[queue:out(Queue)]),
+                                {{value,{NewPid,NewUsername}},NewQueue} = queue:out(Queue),
+                                NewPids = maps:put(NewPid,{NewUsername,0},RemovedPid),
+                                {N,NewPlayerIds} = getId(RPlayerIds),
+                                NeMapPlayers = maps:put(NewPid,[50.0,50.0,0.0,0.0,off,0.0,0.0,off,20.0,3000.0,{100.0,100.0,100.0,on,on,on}, 0],ReMapPlayers),
+                                NewMapPlayers = maps:put(NewPid,initial(Pid,MapPlayers,MapCreatures,ObsList,N),NeMapPlayers),
+                                sendObs(NewPid,N,ObsList);
+                                
+                            true ->
+                                NewPlayerIds = RPlayerIds,
+                                NewQueue = Queue,
+                                NewPids = RemovedPid,
+                                NewMapPlayers = ReMapPlayers
+                            end;                 
+                    error ->
+                        NewPids = Pids,
+                        NewMapPlayers = MapPlayers,
+                        NewPlayerIds = PlayerIds,
+                        Username = getUser(Pid,Queue),
+                        NewQueue = queue:filter(fun({P,_}) -> not(P==Username) end,Queue),
+                        loginManager ! {leave,Username}
+                end,
+                    loop(NewPids,NewMapPlayers,ObsList,MapCreatures,NewPlayerIds,CreatureIds,NewQueue,HighScore);
+            
+
+
+
             {killCreature,Cid} ->
+                print("Despawning"),
                 NewMapCreatures = maps:remove(Cid,MapCreatures),
                 {X,Y,Z} = CreatureIds,
                 NewCreatureIds =if
@@ -204,11 +265,13 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore)
                 loop(Pids,MapPlayers,ObsList,NewMapCreatures,PlayerIds,NewCreatureIds,Queue,HighScore);
 
             {resetScore,Pid}->
+                print("Score Reset"),
                 {Username,_} = maps:get(Pid,Pids),
                 NewPids = maps:update(Pid,{Username,0},Pids),
                 loop(NewPids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore);
 
             {addScore,Pid}->
+                print("Score Add"),
                 {_,HS} = HighScore,
                 {Username,Score} = maps:get(Pid,Pids),
                 NewPids = maps:update(Pid,{Username,Score+1},Pids),
@@ -234,6 +297,15 @@ initial(Key,MapPlayers,MapCreatures,ObsList,N)->
 % Vel Rot W
 % Accel Rot Alpha
 % Charge 1,2
+
+getUser(Pid,Queue) ->
+    List = queue:to_list(Queue),
+    {value,Value} = lists:search(fun({P,_}) -> P==Pid end,List),
+    {_,Result} = Value,
+    Result.
+
+
+
 
 getId(N)->
     {X,Y,Z} = N,
@@ -633,7 +705,7 @@ sendObs(Pid,N,ObsList)->
     List = lists:foldl(fun({X,Y,S},AccIn) -> [io_lib:format("~.3f",[X]),io_lib:format("~.3f",[Y]),io_lib:format("~.3f",[S]) | AccIn]  end,[],ObsList),
     Out = string:join(List," "),
     Out2 = integer_to_list(N) ++ " "++ string:concat(Out,"\r\n"),
-    Pid ! {line, Out2},
+    Pid ! {playing, Out2},
     ok.
 
 
@@ -666,11 +738,21 @@ user(Sock) ->
         {tcp, _, Data} ->
             ?MODULE ! {line, Data,self()},
             user(Sock);
+        
+        {queued,Size} ->
+            gen_tcp:send(Sock,"Q\r\n"),
+            user(Sock);
+        
+        {playing,Msg}->
+            gen_tcp:send(Sock, Msg),
+            user(Sock);
         {leave} ->
             gen_tcp:send(Sock,"RIP\r\n");
         {tcp_closed, _} ->
+            print("TCP CLOSED"),
             ?MODULE ! {leave, self()};
         {tcp_error, _, _} ->
+            print("TCP ERROR"),
             ?MODULE ! {leave, self()}
     end.
 
