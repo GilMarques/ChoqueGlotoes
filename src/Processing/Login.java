@@ -15,7 +15,8 @@ public class Login {
     final int stateWaitRegister = 6;
     final int stateQueue = 7;
     final int stateGame = 8;
-    final int stateDead = 9;
+    final int GameStart = 9;
+    final int stateDead = 10;
     private final ArrayList<Obstacle> obstacles;
     int MyID;
     PApplet p = MainProcessing.processing;
@@ -128,23 +129,10 @@ public class Login {
                     resultRegister = txt;
                     txt = "";
                 } else if (state == stateLoginPasswordBox) {
-                    state = stateWaitLogin;
                     resultLPassword = txt;
                     txt = "";
                     l.write("Login " + "U: " + resultLogin + " P: " + resultLPassword + " ");
-                    String res = l.read();
-                    boolean b = Boolean.parseBoolean(res);
-                    if (b) {
-                        String r;
-                        r = l.read();
-                        String[] strings = r.split(" ");
-                        MyID = Integer.parseInt(strings[0]);
-                        obstacles.add(new Obstacle(Float.parseFloat(strings[1]), Float.parseFloat(strings[2]), Float.parseFloat(strings[3])));
-                        obstacles.add(new Obstacle(Float.parseFloat(strings[4]), Float.parseFloat(strings[5]), Float.parseFloat(strings[6])));
-                        obstacles.add(new Obstacle(Float.parseFloat(strings[7]), Float.parseFloat(strings[8]), Float.parseFloat(strings[9])));
-                        obstacles.add(new Obstacle(Float.parseFloat(strings[10]), Float.parseFloat(strings[11]), Float.parseFloat(strings[12])));
-                        state = stateGame;
-                    }
+                    state = stateWaitLogin;
                 } else if (state == stateRegisterPasswordBox) {
                     state = stateWaitRegister;
                     resultRPassword = txt;
