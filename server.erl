@@ -118,7 +118,7 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore)
     receive
             {run,Delta} -> 
                 %print("Run"),
-                io:format(" ~p ~n",[MapPlayers]),
+                
                 {NewMapPlayers,NewMapCreatures}= simulate(MapPlayers,ObsList,MapCreatures,Delta),
                 sendState(NewMapPlayers,NewMapCreatures,Pids,HighScore),
                 loop(Pids,NewMapPlayers,ObsList,NewMapCreatures,PlayerIds,CreatureIds,Queue,HighScore);   
@@ -179,6 +179,7 @@ loop(Pids,MapPlayers,ObsList,MapCreatures,PlayerIds,CreatureIds,Queue,HighScore)
 
             {kill, Pid,I} ->
                 print("Leaving"),
+                io:format(" ~p ~n",[Pids]),
                 Size = maps:size(Pids),
                 case maps:find(Pid,Pids) of
                     {ok,_}->
@@ -356,8 +357,8 @@ collisionObs(Key,Obs,Map) ->
             TangentX = -NormalY,
             TangentY = NormalX,
             DPTan =  VX*TangentX + VY*TangentY,
-            NewVX = TangentX * DPTan - VX,
-            NewVY = TangentY * DPTan - VY,
+            NewVX = 2*TangentX * DPTan - VX,
+            NewVY = 2*TangentY * DPTan - VY,
             Collided = true,
             [X+1.5*NewVX*(16/1000), Y+1.5*NewVY*(16/1000),NewVX,NewVY,AccelL,A,W,AccelR,R,Agility,Batteries,I];
         true ->
@@ -401,8 +402,8 @@ collidePlayers(Key1,Key2,MapPlayers,MapCreatures,ObsList)->
         {{ok,_},{ok,_}}->
             if 
                 not(Key1 == Key2)->
-                    [X1,Y1,_,_,_,_,_,_,R1,_,_,_] = maps:get(Key1,MapPlayers),
-                    [X2,Y2,_,_,_,_,_,_,R2,_,_,_] = maps:get(Key2,MapPlayers),
+                    [X1,Y1,VX1,VY1,AccelL1,A1,W1,AccelR1,R1,Agility1,Batteries1,I1] = maps:get(Key1,MapPlayers),
+                    [X2,Y2,VX2,VY2,AccelL2,A2,W2,AccelR2,R2,Agility2,Batteries2,I2] = maps:get(Key2,MapPlayers),
                     Xdist = X2-X1,
                     Ydist = Y2-Y1,
                     Dist = math:sqrt((Xdist*Xdist) + (Ydist*Ydist)),
@@ -414,11 +415,59 @@ collidePlayers(Key1,Key2,MapPlayers,MapCreatures,ObsList)->
                                 R1>R2 -> 
                                     ?MODULE ! {addScore,Key1},
                                     ?MODULE ! {resetScore,Key2},
-                                    maps:update(Key2,generate_safespot(Key2,MapPlayers,MapCreatures,ObsList),MapPlayers);                           
+                                    NewR2 =
+                                        if
+                                            R2-10 < 10.0 -> 10.0;
+                                            true -> R2-10
+                                        end,
+                                    NewAgility2 =
+                                        if
+                                            Agility2+500 >= 5000 -> 5000;
+                                            true -> Agility2+500
+                                        end,
+
+                                    NewR1 =
+                                        if
+                                            R1+10 >= 40.0 -> 40.0;
+                                            true -> R1+10
+                                        end,
+                                    NewAgility1 =
+                                        if
+                                            Agility1-500 =< 500 -> 500;
+                                            true -> Agility1-500
+                                        end,
+                                    NewMap1 = maps:update(Key1,[X1,Y1,VX1,VY1,AccelL1,A1,W1,AccelR1,NewR1,NewAgility1,Batteries1,I1],MapPlayers),
+                                    NewMap2 = maps:update(Key2,[X2,Y2,VX2,VY2,AccelL2,A2,W2,AccelR2,NewR2,NewAgility2,Batteries2,I2],NewMap1),
+                                    maps:update(Key2,generate_safespot(Key2,NewMap2,MapCreatures,ObsList),NewMap2);                           
                                 true ->
                                     ?MODULE ! {addScore,Key2},
                                     ?MODULE ! {resetScore,Key1},
-                                    maps:update(Key1,generate_safespot(Key1,MapPlayers,MapCreatures,ObsList),MapPlayers)
+
+                                    NewR1 =
+                                        if
+                                            R1-10 < 10.0 -> 10.0;
+                                            true -> R1-10
+                                        end,
+                                    NewAgility1 =
+                                        if
+                                            Agility1+500 >= 5000 -> 5000;
+                                            true -> Agility1+500
+                                        end,
+
+                                    NewR2 =
+                                        if
+                                            R2+10 >= 40.0 -> 40.0;
+                                            true -> R2+10
+                                        end,
+                                    NewAgility2 =
+                                        if
+                                            Agility2-500 =< 500 -> 500;
+                                            true -> Agility2-500
+                                        end,
+                                    NewMap1 = maps:update(Key1,[X1,Y1,VX1,VY1,AccelL1,A1,W1,AccelR1,NewR1,NewAgility1,Batteries1,I1],MapPlayers),
+                                    NewMap2 = maps:update(Key2,[X2,Y2,VX2,VY2,AccelL2,A2,W2,AccelR2,NewR2,NewAgility2,Batteries2,I2],NewMap1),
+                                    maps:update(Key1,generate_safespot(Key1,NewMap2,MapCreatures,ObsList),NewMap2)
+                                   
                             end;
                         SumR<Dist -> MapPlayers
                     end;

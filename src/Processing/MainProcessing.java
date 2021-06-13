@@ -157,7 +157,7 @@ public class MainProcessing extends PApplet {
                         obstacles.add(new Obstacle(Float.parseFloat(strings[10]), Float.parseFloat(strings[11]), Float.parseFloat(strings[12])));
                         log.state = log.stateGame;
                     }
-                }
+                }else log.state = log.stateNormal;
             } else if (log.state == log.stateGame) {
                 if (!canDraw) canDraw = true;
                 r = l.read();
