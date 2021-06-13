@@ -23,7 +23,7 @@ public class Battery {
 
     void draw(){
         p.fill(0,255,0);
-        p.rect(x+w/4,2.35f*y,w/2,h*capacity-2.35f*y,20);
+        p.rect(x+w/3.82f,y+h*0.9f,w/2.1f,-h*capacity*0.8f,20);
         p.image(img,x,y,w,h);
         p.fill(0);
         p.text((int) (capacity * 100f) +"%",x+w/2,y+0.8f*h);

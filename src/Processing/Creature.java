@@ -31,11 +31,11 @@ public class Creature {
     }
 
     public void draw() {
-        p.ellipse(pos.x + radius * PApplet.cos(angle), pos.y + radius * PApplet.sin(angle), radius / 2, radius / 2);
+        //p.ellipse(pos.x + radius * PApplet.cos(angle), pos.y + radius * PApplet.sin(angle), radius / 2, radius / 2);
         p.pushMatrix();
         p.rotate(angle);
         p.popMatrix();
-        p.fill(red, green, 0f, 50f);
+        p.fill(red, green, 0f);
         p.circle(pos.x, pos.y, radius * 2);
     }
 }
